@@ -22,7 +22,7 @@ function resetApp() {
 }
 
 function switchTab(name) {
-  const names = ['species','health','origin','quality','use','dims'];
+  const names = ['species','health','origin','quality','use','dims','volume'];
   document.querySelectorAll('.tab-btn').forEach((b, i) =>
     b.classList.toggle('active', names[i] === name)
   );
@@ -75,7 +75,9 @@ function parseCSV(text, name) {
     return result;
   }
 
-  var headers = splitLine(lines[0]).map(function(h) { return h.replace(/^"|"$/g, '').trim(); });
+  var headers = splitLine(lines[0]).map(function(h) { 
+    return h.replace(/^"|"$/g, '').replace(/^\uFEFF/, '').trim(); 
+  });
   var rows = [];
   for (var i = 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
@@ -147,13 +149,17 @@ function renderDashboard(rows, headers, fileName, delim) {
   var originCol  = findCol(headers, 'Origin:', 'Origin:', null);
   var qualityCol = findCol(headers, 'Quality:', 'Quality:', null);
   var useCol     = findCol(headers, 'Use:', 'Use:', null);
+  var izCol      = findCol(headers, 'InclusionZone_ha', null, 'inclusionzone');
+  var plotCol    = findCol(headers, '_parent_index', null, 'parent_index');
 
   document.getElementById('debug-info').innerHTML =
     '<strong>Delimiter:</strong> "' + delim + '" &nbsp;|&nbsp; <strong>Columns mapped:</strong> '
     + 'Species: <em>' + (speciesCol || '—') + '</em> &nbsp; '
     + 'Health: <em>'  + (healthCol  || '—') + '</em> &nbsp; '
     + 'Diameter: <em>'+ (diagCol    || '—') + '</em> &nbsp; '
-    + 'Height: <em>'  + (htCol      || '—') + '</em>';
+    + 'Height: <em>'  + (htCol      || '—') + '</em> &nbsp; '
+    + 'IZ: <em>'      + (izCol      || '—') + '</em> &nbsp; '
+    + 'Plot: <em>'    + (plotCol    || '—') + '</em>';
 
   var diams = diagCol ? rows.map(function(r) { return parseNum(r[diagCol]); }).filter(function(v) { return !isNaN(v) && v > 0; }) : [];
   var hts   = htCol   ? rows.map(function(r) { return parseNum(r[htCol]);   }).filter(function(v) { return !isNaN(v) && v > 0; }) : [];
@@ -204,6 +210,8 @@ function renderDashboard(rows, headers, fileName, delim) {
       '<table class="summary"><thead><tr><th>Metric</th><th>n</th><th>Min</th><th>Max</th><th>Mean</th><th>Median</th></tr></thead><tbody>' + tbody + '</tbody></table>';
   }
 
+  renderVolumeTab(rows, diagCol, htCol, izCol, plotCol);
+
   function makeHistogram(vals, bins) {
     var mn = Math.floor(Math.min.apply(null, vals));
     var mx = Math.ceil(Math.max.apply(null, vals));
@@ -242,6 +250,103 @@ function renderDashboard(rows, headers, fileName, delim) {
       }));
     }
   }, 100);
+}
+
+function renderVolumeTab(rows, diagCol, htCol, izCol, plotCol) {
+  var el = document.getElementById('volume-stats');
+  if (!diagCol || !htCol || !izCol) {
+    el.innerHTML = '<p class="empty-msg">Missing columns: need Diameter, Height [m] and InclusionZone_ha.</p>';
+    return;
+  }
+
+  var FORM_FACTOR = 0.441;
+
+  // Per-tree calculations
+  var trees = rows.map(function(r) {
+    var diam = parseNum(r[diagCol]);
+    var ht   = parseNum(r[htCol]);
+    var iz   = parseNum(r[izCol]);
+    var plot = plotCol ? (r[plotCol] || 'unknown') : 'all';
+    if (isNaN(diam) || isNaN(ht) || isNaN(iz) || diam <= 0 || ht <= 0 || iz <= 0) return null;
+    var ba      = (Math.PI / 40000) * diam * diam;
+    var vol     = ba * ht * FORM_FACTOR;
+    var volHa   = vol / iz;
+    return { plot: plot, diam: diam, ht: ht, iz: iz, ba: ba, vol: vol, volHa: volHa };
+  }).filter(function(t) { return t !== null; });
+
+  if (!trees.length) {
+    el.innerHTML = '<p class="empty-msg">No valid rows — check that Diameter, Height and InclusionZone_ha all have numeric values.</p>';
+    return;
+  }
+
+  // Group by plot
+  var plots = {};
+  trees.forEach(function(t) {
+    if (!plots[t.plot]) plots[t.plot] = { trees: 0, totalVol: 0, totalVolHa: 0, totalBA: 0 };
+    plots[t.plot].trees++;
+    plots[t.plot].totalVol   += t.vol;
+    plots[t.plot].totalVolHa += t.volHa;
+    plots[t.plot].totalBA    += t.ba;
+  });
+
+  var plotIds   = Object.keys(plots).sort();
+  var totalVolHa = plotIds.reduce(function(s, p) { return s + plots[p].totalVolHa; }, 0);
+  var meanVolHa  = totalVolHa / plotIds.length;
+
+  // Summary cards
+  el.innerHTML =
+    '<div class="stat-grid" style="margin-bottom:1.25rem;">'
+    + '<div class="stat-card"><div class="label">Trees calculated</div><div class="value">' + trees.length + '</div></div>'
+    + '<div class="stat-card"><div class="label">Plots</div><div class="value">' + plotIds.length + '</div></div>'
+    + '<div class="stat-card"><div class="label">Mean vol/ha</div><div class="value">' + meanVolHa.toFixed(1) + '<span> m\u00B3/ha</span></div></div>'
+    + '<div class="stat-card"><div class="label">Total vol/ha</div><div class="value">' + totalVolHa.toFixed(1) + '<span> m\u00B3/ha</span></div></div>'
+    + '</div>'
+    + '<div class="section-title">Volume per hectare by plot</div>'
+    + '<table class="summary"><thead><tr>'
+    + '<th>Plot (_parent_index)</th><th>Trees</th><th>Total BA (m\u00B2)</th><th>Total vol (m\u00B3)</th><th>Vol/ha (m\u00B3/ha)</th>'
+    + '</tr></thead><tbody>'
+    + plotIds.map(function(p) {
+        var d = plots[p];
+        return '<tr>'
+          + '<td>' + p + '</td>'
+          + '<td>' + d.trees + '</td>'
+          + '<td>' + d.totalBA.toFixed(4) + '</td>'
+          + '<td>' + d.totalVol.toFixed(3) + '</td>'
+          + '<td><strong>' + d.totalVolHa.toFixed(2) + '</strong></td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table>';
+
+  // Bar chart — vol/ha per plot
+  setTimeout(function() {
+    var canvas = document.getElementById('volume-chart');
+    if (!canvas) return;
+    var volData = plotIds.map(function(p) { return parseFloat(plots[p].totalVolHa.toFixed(2)); });
+    charts.push(new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: plotIds,
+        datasets: [{
+          label: 'Vol/ha (m\u00B3/ha)',
+          data: volData,
+          backgroundColor: '#3266ad',
+          borderRadius: 3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          title: { display: true, text: 'Volume per hectare by plot (m\u00B3/ha)' }
+        },
+        scales: {
+          x: { ticks: { autoSkip: false, maxRotation: 45, font: { size: 10 } } },
+          y: { beginAtZero: true }
+        }
+      }
+    }));
+  }, 150);
 }
 
 document.addEventListener('DOMContentLoaded', function() {

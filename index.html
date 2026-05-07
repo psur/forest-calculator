@@ -3,10 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Forest Calculator</title>
+  <title>Tree Inventory Analyzer</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -194,7 +193,7 @@
   </div>
 
   <!-- Dashboard -->
- <div id="dashboard">
+  <div id="dashboard">
     <div class="top-bar">
       <div>
         <span class="file-info" id="file-name"></span>
@@ -214,6 +213,7 @@
       <button class="tab-btn" onclick="switchTab('quality')">Quality</button>
       <button class="tab-btn" onclick="switchTab('use')">Use</button>
       <button class="tab-btn" onclick="switchTab('dims')">Dimensions</button>
+      <button class="tab-btn" onclick="switchTab('volume')">Volume</button>
     </div>
 
     <div id="tab-species" class="tab-panel active"></div>
@@ -226,12 +226,11 @@
       <div id="dims-stats"></div>
       <div class="chart-wrap"><canvas id="diam-chart" role="img" aria-label="Diameter histogram"></canvas></div>
       <div class="chart-wrap"><canvas id="ht-chart"   role="img" aria-label="Height histogram"></canvas></div>
-      <div class="inclusion-note">
-        <strong>&#9888; Inclusion zone dependency</strong>
-        Diameter-based summaries (basal area, stem density per ha) depend on the
-        <strong>inclusion zone radius</strong> used during sampling. This is not yet
-        implemented. See <code>TODO</code> in <code>js/calculations.js</code>.
-      </div>
+    </div>
+
+    <div id="tab-volume" class="tab-panel">
+      <div id="volume-stats"></div>
+      <div class="chart-wrap" style="height:320px;"><canvas id="volume-chart" role="img" aria-label="Volume per ha by plot"></canvas></div>
     </div>
   </div>
 
