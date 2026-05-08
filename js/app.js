@@ -167,7 +167,6 @@ function renderDashboard(parsed, fileName) {
   var healthCol  = findCol(headers,'Health:','Health:',null);
   var originCol  = findCol(headers,'Origin:','Origin:',null);
   var qualityCol = findCol(headers,'Quality:','Quality:',null);
-  var useCol     = findCol(headers,'Use:','Use:',null);
   var izCol      = findCol(headers,'InclusionZone_ha',null,'inclusionzone');
   var plotCol    = findCol(headers,'_parent_index',null,'parent_index');
 
@@ -198,13 +197,30 @@ function renderDashboard(parsed, fileName) {
   [{id:'species',col:speciesCol,label:'Species breakdown'},
    {id:'health', col:healthCol, label:'Health status'},
    {id:'origin', col:originCol, label:'Origin'},
-   {id:'quality',col:qualityCol,label:'Quality'},
-   {id:'use',    col:useCol,    label:'Use'}
+   {id:'quality',col:qualityCol,label:'Quality'}
   ].forEach(function(t) {
     document.getElementById('tab-'+t.id).innerHTML = t.col
       ? '<div class="section-title">'+t.label+'</div>'+barChart(countBy(rows,t.col),rows.length)
       : '<p class="empty-msg">Column not found.</p>';
   });
+
+  // Genus tab
+// Genus tab
+  if (speciesCol) {
+    var genusCounts = {};
+    rows.forEach(function(r) {
+      var sp = (r[speciesCol] || '').trim();
+      var genus = sp ? sp.split(' ')[0] : '(unknown)';
+      genusCounts[genus] = (genusCounts[genus] || 0) + 1;
+    });
+    var genusEntries = Object.entries(genusCounts)
+      .sort(function(a,b){ return b[1]-a[1]; });
+    document.getElementById('tab-genus').innerHTML =
+      '<div class="section-title">Genus breakdown</div>'
+      + barChart(genusEntries, rows.length);
+  } else {
+    document.getElementById('tab-genus').innerHTML = '<p class="empty-msg">Species column not found.</p>';
+  }
 
   var tbody = '';
   if (ds) tbody+='<tr><td>Diameter (cm)</td><td>'+ds.n+'</td><td>'+ds.min+'</td><td>'+ds.max+'</td><td>'+ds.mean.toFixed(1)+'</td><td>'+ds.median.toFixed(1)+'</td></tr>';
