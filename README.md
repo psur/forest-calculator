@@ -1,6 +1,6 @@
 # Tree Inventory Analyzer
 
-A lightweight, browser-based tool for exploring tree inventory data exported from **KoBoToolbox** (or any compatible CSV). No server needed — just open `index.html`.
+A lightweight, browser-based tool for exploring tree inventory data exported from **KoBoToolbox** (or any compatible CSV).
 
 ## Features
 
