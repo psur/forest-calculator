@@ -339,19 +339,23 @@ function runZoneCalculation() {
   // Per-plot vol/ha
   var plotSummary = buildPlotSummary(trees);
 
-  // Per-class avg vol/ha
+  // Per-class avg vol/ha — ALL plots in the plots CSV contribute;
+  // plots with no trees count as 0 vol/ha
   var classAccum = {};
-  Object.keys(plotSummary).forEach(function(plotId) {
+  Object.keys(plotClassMap).forEach(function(plotId) {
     var cls = plotClassMap[plotId];
     if (!cls) return;
-    if (!classAccum[cls]) classAccum[cls] = [];
-    classAccum[cls].push(plotSummary[plotId].totalVolHa);
+    if (!classAccum[cls]) classAccum[cls] = { sum: 0, count: 0, zeros: 0 };
+    var volHa = plotSummary[plotId] ? plotSummary[plotId].totalVolHa : 0;
+    classAccum[cls].sum   += volHa;
+    classAccum[cls].count += 1;
+    if (!plotSummary[plotId]) classAccum[cls].zeros += 1;
   });
 
   var classAvg = {};
   Object.keys(classAccum).forEach(function(cls) {
-    var vals = classAccum[cls];
-    classAvg[cls] = vals.reduce(function(s,v){return s+v;},0) / vals.length;
+    var a = classAccum[cls];
+    classAvg[cls] = a.count > 0 ? a.sum / a.count : 0;
   });
 
   // Fallback chain: 12->21, 21->22, 22->21 (then 12)
@@ -377,14 +381,14 @@ function runZoneCalculation() {
 
   // Class summary table
   var classHtml = '<div class="section-title">Average volume per hectare by class</div>'
-    +'<table class="summary"><thead><tr><th>Class</th><th>Plots</th><th>Avg vol/ha (m\u00B3/ha)</th><th>Note</th></tr></thead><tbody>'
+    +'<table class="summary"><thead><tr><th>Class</th><th>Plots (total)</th><th>Empty plots (0 m\u00B3/ha)</th><th>Avg vol/ha (m\u00B3/ha)</th><th>Note</th></tr></thead><tbody>'
     +classNames.map(function(cls){
-      var n   = classAccum[cls] ? classAccum[cls].length : 0;
+      var a   = classAccum[cls] || { count: 0, zeros: 0 };
       var eff = classAvgEff[cls];
       var note = eff.missing ? '<span style="color:#D85A30">no plots, no fallback</span>'
                : eff.source  ? '<span style="color:#BA7517">fallback from class '+eff.source+'</span>'
                : '';
-      return '<tr><td>'+cls+'</td><td>'+n+'</td><td>'+(eff.missing?'\u2014':fmtN(eff.avg,2))+'</td><td>'+note+'</td></tr>';
+      return '<tr><td>'+cls+'</td><td>'+a.count+'</td><td>'+a.zeros+'</td><td>'+(eff.missing?'\u2014':fmtN(eff.avg,2))+'</td><td>'+note+'</td></tr>';
     }).join('')
     +'</tbody></table>';
 
@@ -424,7 +428,7 @@ function runZoneCalculation() {
   var zoneHtml = '<div class="section-title" style="margin-top:2rem;">Total volume by zone and class (m\u00B3)</div>'
     +'<div class="zone-table-wrap"><table class="summary"><thead>'+thead+'</thead><tbody>'+tbody+totalsRow+'</tbody></table></div>';
 
-  // Unmatched plots warning
+  // Plots in tree data not found in plots CSV (unmatched)
   var unmatchedPlots = Object.keys(plotSummary).filter(function(p){return !plotClassMap[p];});
   var warningHtml = '';
   if (unmatchedPlots.length) {
