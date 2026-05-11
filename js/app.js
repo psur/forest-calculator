@@ -242,9 +242,20 @@ function renderDashboard(parsed, fileName) {
     }
     return {labels:labels,counts:counts};
   }
+  function makeHistFixed(vals, step) {
+    var mn=Math.floor(Math.min.apply(null,vals)/step)*step;
+    var mx=Math.ceil(Math.max.apply(null,vals)/step)*step;
+    var labels=[], counts=[];
+    for(var lo=mn; lo<mx; lo+=step){
+      var hi=lo+step;
+      labels.push(lo+'\u2013'+hi);
+      counts.push(vals.filter(function(v){return v>=lo&&v<hi;}).length);
+    }
+    return {labels:labels,counts:counts};
+  }
   charts.forEach(function(c){c.destroy();}); charts=[];
   setTimeout(function(){
-    if(diams.length){var dh=makeHist(diams,12);charts.push(new Chart(document.getElementById('diam-chart'),{type:'bar',data:{labels:dh.labels,datasets:[{label:'Trees',data:dh.counts,backgroundColor:'#3266ad',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Diameter distribution (cm)'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
+    if(diams.length){var dh=makeHistFixed(diams,5);charts.push(new Chart(document.getElementById('diam-chart'),{type:'bar',data:{labels:dh.labels,datasets:[{label:'Trees',data:dh.counts,backgroundColor:'#3266ad',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Diameter distribution (cm) \u2014 5 cm classes'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
     if(hts.length){var hh=makeHist(hts,12);charts.push(new Chart(document.getElementById('ht-chart'),{type:'bar',data:{labels:hh.labels,datasets:[{label:'Trees',data:hh.counts,backgroundColor:'#1D9E75',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Height distribution (m)'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
   },100);
 }
