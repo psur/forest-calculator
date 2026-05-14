@@ -258,6 +258,87 @@ function renderDashboard(parsed, fileName) {
     if(diams.length){var dh=makeHistFixed(diams,5);charts.push(new Chart(document.getElementById('diam-chart'),{type:'bar',data:{labels:dh.labels,datasets:[{label:'Trees',data:dh.counts,backgroundColor:'#3266ad',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Diameter distribution (cm) \u2014 5 cm classes'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
     if(hts.length){var hh=makeHist(hts,12);charts.push(new Chart(document.getElementById('ht-chart'),{type:'bar',data:{labels:hh.labels,datasets:[{label:'Trees',data:hh.counts,backgroundColor:'#1D9E75',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Height distribution (m)'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
   },100);
+
+  // ── Diameter class table (10 cm intervals, trees/ha) — bottom of Dimensions tab
+  (function() {
+    // Always remove and recreate to avoid duplicates on re-upload
+    var el = document.getElementById('dims-dclass');
+    if (el) el.parentNode.removeChild(el);
+    el = document.createElement('div');
+    el.id = 'dims-dclass';
+    // Use dims-stats parent — guaranteed correct container regardless of tab ID
+    var anchor = document.getElementById('dims-stats');
+    if (!anchor) return;
+    anchor.parentNode.appendChild(el);
+    if (!diagCol || !plotCol) {
+      el.innerHTML = '<p class="empty-msg">Need Diameter and Plot columns for diameter class table.</p>'; return;
+    }
+
+    // Expansion multipliers by diameter group
+    var CLASSES = [
+      { label: '0 \u2013 10 cm',  lo:  0, hi: 10,      mult: 198.9436 },
+      { label: '10 \u2013 20 cm', lo: 10, hi: 20,      mult:  31.8309 },
+      { label: '20 \u2013 30 cm', lo: 20, hi: 30,      mult:   9.8243 },
+      { label: '30 \u2013 40 cm', lo: 30, hi: 40,      mult:   9.8243 },
+      { label: '40 \u2013 50 cm', lo: 40, hi: 50,      mult:   9.8243 },
+      { label: '50 \u2013 60 cm', lo: 50, hi: 60,      mult:   9.8243 },
+      { label: '60 \u2013 70 cm', lo: 60, hi: 70,      mult:   9.8243 },
+      { label: '\u2265 70 cm',    lo: 70, hi: Infinity, mult:   9.8243 }
+    ];
+
+    // Collect all unique plot IDs from tree rows
+    var allPlots = {};
+    rows.forEach(function(r) {
+      var p = String((r[plotCol] || '')).trim();
+      if (p) allPlots[p] = true;
+    });
+    var plotList = Object.keys(allPlots);
+    var nPlots = plotList.length;
+    if (!nPlots) { el.innerHTML = '<p class="empty-msg">No plot data found.</p>'; return; }
+
+    // Count raw trees per plot per class
+    var perPlot = {};
+    plotList.forEach(function(p) {
+      perPlot[p] = CLASSES.map(function() { return 0; });
+    });
+    rows.forEach(function(r) {
+      var d = parseNum(r[diagCol]);
+      var p = String((r[plotCol] || '')).trim();
+      if (isNaN(d) || d <= 0 || !perPlot[p]) return;
+      for (var i = 0; i < CLASSES.length; i++) {
+        if (d >= CLASSES[i].lo && d < CLASSES[i].hi) { perPlot[p][i]++; break; }
+      }
+    });
+
+    // Average raw count across all plots, apply multiplier, round to integer
+    var results = CLASSES.map(function(c, i) {
+      var sumRaw = plotList.reduce(function(s, p) { return s + perPlot[p][i]; }, 0);
+      var avgRaw = sumRaw / nPlots;
+      return { label: c.label, avgRaw: avgRaw, treesHa: Math.round(avgRaw * c.mult), mult: c.mult };
+    });
+
+    // Drop empty trailing classes
+    var last = results.length - 1;
+    while (last > 0 && results[last].avgRaw === 0) last--;
+    var shown = results.slice(0, last + 1);
+    // Sum of rounded integers
+    var totalTreesHa = shown.reduce(function(s, r) { return s + r.treesHa; }, 0);
+
+    el.innerHTML =
+      '<div class="section-title" style="margin-top:1.5rem;">Estimated trees per hectare by diameter class</div>'
+      + '<table class="summary"><thead><tr>'
+      + '<th>Diameter class</th><th>Avg trees\u2009/\u2009plot</th><th>Expansion factor</th><th>Trees\u2009/\u2009ha</th>'
+      + '</tr></thead><tbody>'
+      + shown.map(function(r) {
+          return '<tr><td>' + r.label + '</td><td>' + r.avgRaw.toFixed(3)
+            + '</td><td>' + r.mult + '</td><td><strong>' + r.treesHa + '</strong></td></tr>';
+        }).join('')
+      + '<tr class="total-row"><td><strong>TOTAL</strong></td><td></td><td></td>'
+      + '<td><strong>' + totalTreesHa + '</strong></td></tr>'
+      + '</tbody></table>'
+      + '<p style="font-size:11px;color:#888;margin-top:4px;">Based on ' + nPlots
+      + ' plot(s). Plots with no trees in a class contribute 0 to the average.</p>';
+  })();
 }
 
 function renderVolumeTab(rows, diagCol, htCol, izCol, plotCol) {
