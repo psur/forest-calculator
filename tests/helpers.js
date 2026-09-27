@@ -12,29 +12,53 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const TABS = ['species', 'genus', 'health', 'origin', 'quality', 'dims', 'volume', 'zones'];
+
 function makeElement(id) {
+  const classes = new Set();
   return {
     id: id, innerHTML: '', textContent: '', value: '', disabled: false, style: {},
-    classList: { add() {}, remove() {}, toggle() {} },
+    classList: {
+      add(c) { classes.add(c); }, remove(c) { classes.delete(c); }, contains(c) { return classes.has(c); },
+      toggle(c, on) { (on === undefined ? !classes.has(c) : on) ? classes.add(c) : classes.delete(c); }
+    },
     parentNode: { appendChild() {}, removeChild() {} },
-    addEventListener() {}
+    addEventListener() {}, getAttribute() { return null; }
   };
 }
+
+/** Records every chart created; `destroyed` is set by destroy(). */
+class ChartStub {
+  constructor(canvas, config) {
+    this.canvasId = canvas && canvas.id;
+    this.config = config;
+    this.destroyed = false;
+    ChartStub.instances.push(this);
+  }
+  destroy() {
+    if (this.destroyed) throw new Error('chart destroyed twice');
+    this.destroyed = true;
+  }
+}
+ChartStub.instances = [];
 
 function installDomStub() {
   const elements = {};
+  const byId = id => elements[id] || (elements[id] = makeElement(id));
   globalThis.document = {
-    getElementById(id) { return elements[id] || (elements[id] = makeElement(id)); },
+    getElementById: byId,
     createElement() { return makeElement(null); },
-    querySelectorAll() { return []; },
+    querySelectorAll(sel) { return sel === '.tab-panel' ? TABS.map(t => byId('tab-' + t)) : []; },
     addEventListener() {}
   };
-  // renderVolumeTab creates a chart in a setTimeout; make that a no-op.
-  globalThis.Chart = class { destroy() {} };
+  byId('tab-species').classList.add('active');   // as in index.html
+  globalThis.Chart = ChartStub;
 }
 
 installDomStub();
-// In the browser config.js defines a global CONFIG before app.js runs; mirror that.
+// In the browser these are globals set by <script> tags before app.js runs; mirror that.
+// tests/vendor/ holds the exact PapaParse file index.html loads from cdnjs (same SRI hash).
+globalThis.Papa = require('./vendor/papaparse-5.6.1.min.js');
 globalThis.CONFIG = require('../js/config.js');
 const app = require('../js/app.js');
 const DEFAULT_CONFIG = structuredClone(globalThis.CONFIG);
@@ -106,6 +130,6 @@ function fmtNum(text) {
 }
 
 module.exports = {
-  app, loadFixture, loadAllFixtures, withConfig, readTables, readStatCards, fmtNum,
+  app, ChartStub, loadFixture, loadAllFixtures, withConfig, readTables, readStatCards, fmtNum,
   el: function(id) { return document.getElementById(id); }
 };

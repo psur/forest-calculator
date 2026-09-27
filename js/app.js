@@ -2,41 +2,74 @@
  * app.js - Forest Calculator v1.1
  */
 
-var charts = [];
 // cols: detected tree-CSV columns; heightModel: fitted by prepareTrees()
 var state = { trees: null, plots: null, zones: null, cols: {}, heightModel: null };
 
 var COLORS = ['#3266ad','#1D9E75','#D85A30','#BA7517','#993556','#534AB7','#639922','#E24B4A','#888780','#185FA5'];
 
+// \u2500\u2500 Charts: drawn when their tab is visible \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// A chart on a hidden (display:none) canvas gets no size, so each tab registers
+// a builder; it runs when the tab is opened, or immediately if already visible.
+
+var charts = {};        // tab name \u2192 [Chart] currently drawn
+var chartBuilders = {}; // tab name \u2192 function returning [Chart]
+
+function destroyTabCharts(tab) {
+  (charts[tab] || []).forEach(function(c) { c.destroy(); });
+  delete charts[tab];
+}
+
+function destroyAllCharts() {
+  Object.keys(charts).forEach(destroyTabCharts);
+  chartBuilders = {};
+}
+
+function isTabVisible(tab) {
+  var panel = document.getElementById('tab-' + tab);
+  return !!panel && panel.classList.contains('active');
+}
+
+function drawTabCharts(tab) {
+  if (charts[tab] || !chartBuilders[tab]) return;
+  charts[tab] = chartBuilders[tab]();
+}
+
+/** Replace a tab's charts: old ones are destroyed, new ones drawn now or on tab open. */
+function setTabCharts(tab, build) {
+  destroyTabCharts(tab);
+  chartBuilders[tab] = build;
+  if (isTabVisible(tab)) drawTabCharts(tab);
+}
+
+// \u2500\u2500 Text helpers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+/** Escape text for insertion into innerHTML (element content and quoted attributes). */
+function escapeHtml(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+/**
+ * Parse CSV text with PapaParse (quoted fields may contain delimiters, "" and
+ * line breaks). Delimiter: ";" if the header line has more semicolons than
+ * commas, else ",". Cells are trimmed; decimal commas are handled by parseNum.
+ * @returns {{headers, rows, delim, errors}|null} null if there are no data rows
+ */
 function parseCSVText(text) {
   text = text.replace(/^\uFEFF/, '');
-  var lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return null;
-  var h0 = lines[0];
+  var m = text.match(/^.*\S.*$/m);          // first non-blank line = header
+  var h0 = m ? m[0] : '';
   var delim = (h0.split(';').length > h0.split(',').length) ? ';' : ',';
-
-  function splitLine(line) {
-    var result = [], cur = '', inQ = false;
-    for (var i = 0; i < line.length; i++) {
-      var ch = line[i];
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === delim && !inQ) { result.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
-    }
-    result.push(cur.trim());
-    return result;
-  }
-
-  var headers = splitLine(lines[0]).map(function(h) { return h.replace(/^"|"$/g,'').trim(); });
-  var rows = [];
-  for (var i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    var cells = splitLine(lines[i]).map(function(c) { return c.replace(/^"|"$/g,'').trim(); });
+  var res = Papa.parse(text, { delimiter: delim, skipEmptyLines: 'greedy' });
+  if (res.data.length < 2) return null;
+  var headers = res.data[0].map(function(h) { return String(h).trim(); });
+  var rows = res.data.slice(1).map(function(cells) {
     var obj = {};
-    headers.forEach(function(h, j) { obj[h] = cells[j] !== undefined ? cells[j] : ''; });
-    rows.push(obj);
-  }
-  return { headers: headers, rows: rows, delim: delim };
+    headers.forEach(function(h, j) { obj[h] = cells[j] !== undefined ? String(cells[j]).trim() : ''; });
+    return obj;
+  });
+  return { headers: headers, rows: rows, delim: delim, errors: res.errors };
 }
 
 function parseNum(val) {
@@ -61,9 +94,7 @@ function findCol(headers, exact, startsWith, contains) {
 function resetApp() {
   state.trees = state.plots = state.zones = state.heightModel = null;
   state.cols = {};
-  charts.forEach(function(c) { c.destroy(); });
-  charts = [];
-  volumeChart = null;
+  destroyAllCharts();
   document.getElementById('dashboard').style.display = 'none';
   document.getElementById('upload-section').style.display = '';
   document.getElementById('file-input').value = '';
@@ -84,6 +115,7 @@ function switchTab(name) {
   document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
   var panel = document.getElementById('tab-' + name);
   if (panel) panel.classList.add('active');
+  drawTabCharts(name);
 }
 
 function countBy(rows, col) {
@@ -111,7 +143,7 @@ function barChart(entries, total) {
   var max = entries[0][1] || 1;
   return entries.slice(0,20).map(function(e,i) {
     return '<div class="bar-row">'
-      + '<span class="bar-label" title="'+e[0]+'">'+e[0]+'</span>'
+      + '<span class="bar-label" title="'+escapeHtml(e[0])+'">'+escapeHtml(e[0])+'</span>'
       + '<div class="bar-track"><div class="bar-fill" style="width:'+(e[1]/max*100).toFixed(1)+'%;background:'+COLORS[i%COLORS.length]+';"></div></div>'
       + '<span class="bar-count">'+e[1]+' <span style="opacity:.6;">('+( e[1]/total*100).toFixed(0)+'%)</span></span>'
       + '</div>';
@@ -315,13 +347,16 @@ function renderDashboard(parsed, fileName) {
   var healthCol = cols.healthCol, originCol = cols.originCol, qualityCol = cols.qualityCol;
   var izCol = cols.izCol, plotCol = cols.plotCol;
 
+  var errs = parsed.errors || [];
   document.getElementById('debug-info').innerHTML =
-    '<strong>Delim:</strong> "'+delim+'" &nbsp;|&nbsp; '
-    +'Species: <em>'+(speciesCol||'--')+'</em> &nbsp; '
-    +'Diameter: <em>'+(diagCol||'--')+'</em> &nbsp; '
-    +'Height: <em>'+(htCol||'--')+'</em> &nbsp; '
-    +'IZ: <em>'+(izCol||'--')+'</em> &nbsp; '
-    +'Plot: <em>'+(plotCol||'--')+'</em>';
+    '<strong>Delim:</strong> "'+escapeHtml(delim)+'" &nbsp;|&nbsp; '
+    +'Species: <em>'+escapeHtml(speciesCol||'--')+'</em> &nbsp; '
+    +'Diameter: <em>'+escapeHtml(diagCol||'--')+'</em> &nbsp; '
+    +'Height: <em>'+escapeHtml(htCol||'--')+'</em> &nbsp; '
+    +'IZ: <em>'+escapeHtml(izCol||'--')+'</em> &nbsp; '
+    +'Plot: <em>'+escapeHtml(plotCol||'--')+'</em>'
+    +(errs.length ? ' &nbsp;|&nbsp; <strong style="color:#D85A30;">'+errs.length+' CSV parse warning(s)</strong>: '
+      +escapeHtml(errs[0].message)+(errs[0].row !== undefined ? ' (data row '+(errs[0].row)+')' : '') : '');
 
   var diams = diagCol ? rows.map(function(r){return parseNum(r[diagCol]);}).filter(function(v){return !isNaN(v)&&v>0;}) : [];
   var hts   = htCol   ? rows.map(function(r){return parseNum(r[htCol]);  }).filter(function(v){return !isNaN(v)&&v>0;}) : [];
@@ -348,7 +383,6 @@ function renderDashboard(parsed, fileName) {
   });
 
   // Genus tab
-// Genus tab
   if (speciesCol) {
     var genusCounts = {};
     rows.forEach(function(r) {
@@ -396,12 +430,12 @@ function renderDashboard(parsed, fileName) {
     }
     return {labels:labels,counts:counts};
   }
-  charts.forEach(function(c){c.destroy();}); charts=[]; volumeChart=null;
-  setTimeout(function(){
-    var w=CONFIG.diameterClassWidth_cm;
-    if(diams.length){var dh=makeHistFixed(diams,w);charts.push(new Chart(document.getElementById('diam-chart'),{type:'bar',data:{labels:dh.labels,datasets:[{label:'Trees',data:dh.counts,backgroundColor:'#3266ad',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Diameter distribution (cm) \u2014 '+w+' cm classes'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
-    if(hts.length){var hh=makeHist(hts,12);charts.push(new Chart(document.getElementById('ht-chart'),{type:'bar',data:{labels:hh.labels,datasets:[{label:'Trees',data:hh.counts,backgroundColor:'#1D9E75',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Height distribution (m)'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
-  },100);
+  setTabCharts('dims', function(){
+    var w=CONFIG.diameterClassWidth_cm, drawn=[];
+    if(diams.length){var dh=makeHistFixed(diams,w);drawn.push(new Chart(document.getElementById('diam-chart'),{type:'bar',data:{labels:dh.labels,datasets:[{label:'Trees',data:dh.counts,backgroundColor:'#3266ad',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Diameter distribution (cm) \u2014 '+w+' cm classes'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
+    if(hts.length){var hh=makeHist(hts,12);drawn.push(new Chart(document.getElementById('ht-chart'),{type:'bar',data:{labels:hh.labels,datasets:[{label:'Trees',data:hh.counts,backgroundColor:'#1D9E75',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Height distribution (m)'}},scales:{x:{ticks:{autoSkip:true,maxRotation:45}},y:{beginAtZero:true}}}}));}
+    return drawn;
+  });
 
   // ── Diameter class table (trees/ha) — bottom of Dimensions tab
   (function() {
@@ -462,7 +496,7 @@ function heightModelHtml(model, trees) {
   var rows = Object.keys(model.measured).sort().map(function(sp) {
     var own = model.bySpecies[sp];
     var used = own ? 'species' : model.all ? 'all species' : 'none';
-    return '<tr><td>'+sp+'</td><td>'+model.measured[sp]+'</td><td>'+used+'</td><td>'+fmtP(own)+'</td></tr>';
+    return '<tr><td>'+escapeHtml(sp)+'</td><td>'+model.measured[sp]+'</td><td>'+used+'</td><td>'+fmtP(own)+'</td></tr>';
   }).join('');
   var est = trees.filter(function(t){return t.heightEstimated;});
   return '<div class="section-title">Height model</div>'
@@ -475,7 +509,7 @@ function heightModelHtml(model, trees) {
     +(est.length
       ? '<details style="margin-top:1rem;"><summary style="cursor:pointer;font-size:13px;">'+est.length+' tree(s) with estimated height</summary>'
         +'<table class="summary"><thead><tr><th>Plot</th><th>Species</th><th>Diameter (cm)</th><th>Est. height (m)</th><th>Curve</th></tr></thead><tbody>'
-        +est.map(function(t){return '<tr><td>'+t.plot+'</td><td>'+(t.species||'(none)')+'</td><td>'+fmtN(t.diam,1)+'</td><td><em>'+fmtN(t.height,1)+'</em></td><td>'+(t.heightSource==='species'?'species':'all species')+'</td></tr>';}).join('')
+        +est.map(function(t){return '<tr><td>'+escapeHtml(t.plot)+'</td><td>'+escapeHtml(t.species||'(none)')+'</td><td>'+fmtN(t.diam,1)+'</td><td><em>'+fmtN(t.height,1)+'</em></td><td>'+(t.heightSource==='species'?'species':'all species')+'</td></tr>';}).join('')
         +'</tbody></table></details>'
       : '');
 }
@@ -499,11 +533,10 @@ function surveyedPlots(treeRows, cols, plotsParsed) {
   return { ids: ids, source: 'trees' };
 }
 
-var volumeChart = null;
-
 /** @param {object} [plotsParsed] - Plots CSV, if loaded; defines which plots the mean covers */
 function renderVolumeTab(rows, cols, heightModel, plotsParsed) {
   var el = document.getElementById('volume-stats');
+  setTabCharts('volume', null);   // drop any chart from a previous render
   if (!cols.diagCol||!cols.htCol||!cols.izCol) { el.innerHTML='<p class="empty-msg">Need Diameter, Height and InclusionZone_ha columns.</p>'; return; }
   var trees = calcTrees(rows, cols, heightModel);
   if (!trees.length) { el.innerHTML='<p class="empty-msg">No valid rows for volume calculation.</p>'; return; }
@@ -528,7 +561,7 @@ function renderVolumeTab(rows, cols, heightModel, plotsParsed) {
       ? 'Mean over the '+survey.ids.length+' plot(s) in the Plots CSV'
       : 'Mean over the '+survey.ids.length+' plot(s) in the tree data (load the Plots CSV in the Zones tab to include plots without tree rows)')
     + (emptyPlots.length ? '; '+emptyPlots.length+' plot(s) without volume count as 0 m\u00B3/ha' : '') + '.'
-    + (outside.length ? ' * Not in the Plots CSV, excluded from the mean: '+outside.join(', ')+'.' : '');
+    + (outside.length ? ' * Not in the Plots CSV, excluded from the mean: '+escapeHtml(outside.join(', '))+'.' : '');
 
   el.innerHTML =
     '<div class="stat-grid" style="margin-bottom:1.25rem;">'
@@ -542,7 +575,7 @@ function renderVolumeTab(rows, cols, heightModel, plotsParsed) {
     +'<table class="summary"><thead><tr><th>Plot</th><th>Trees</th><th>Basal area (m\u00B2)</th><th>Volume (m\u00B3)</th><th>Vol/ha (m\u00B3/ha)</th><th>Est. heights</th></tr></thead><tbody>'
     +plotIds.map(function(p){
       var d = plots[p] || zero;
-      var label = inSurvey[p] ? p : p+' *';
+      var label = escapeHtml(p) + (inSurvey[p] ? '' : ' *');
       return '<tr'+(plots[p]?'':' style="color:var(--text-muted)"')+'><td>'+label+'</td><td>'+d.trees+'</td><td>'+d.totalBA.toFixed(4)+'</td><td>'+d.totalVol.toFixed(3)+'</td><td><strong>'+fmtN(d.totalVolHa,2)+'</strong></td><td>'+(d.estHeights?'<em>'+d.estHeights+'</em>':'0')+'</td></tr>';
     }).join('')
     +'</tbody></table>'
@@ -550,13 +583,10 @@ function renderVolumeTab(rows, cols, heightModel, plotsParsed) {
     +heightNoteHtml(hc, heightModel)
     +'<div style="margin-top:1.5rem;">'+heightModelHtml(heightModel, trees)+'</div>';
 
-  setTimeout(function(){
-    var canvas=document.getElementById('volume-chart'); if(!canvas)return;
-    // Re-rendered when the Plots CSV is loaded: free the canvas first
-    if (volumeChart) { volumeChart.destroy(); charts = charts.filter(function(c){ return c !== volumeChart; }); }
-    volumeChart = new Chart(canvas,{type:'bar',data:{labels:plotIds,datasets:[{label:'Vol/ha',data:plotIds.map(function(p){return plots[p] ? parseFloat(plots[p].totalVolHa.toFixed(2)) : 0;}),backgroundColor:'#3266ad',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Volume per hectare by plot (m\u00B3/ha)'}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,font:{size:10}}},y:{beginAtZero:true}}}});
-    charts.push(volumeChart);
-  },150);
+  setTabCharts('volume', function(){
+    var canvas=document.getElementById('volume-chart'); if(!canvas)return [];
+    return [new Chart(canvas,{type:'bar',data:{labels:plotIds,datasets:[{label:'Vol/ha',data:plotIds.map(function(p){return plots[p] ? parseFloat(plots[p].totalVolHa.toFixed(2)) : 0;}),backgroundColor:'#3266ad',borderRadius:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},title:{display:true,text:'Volume per hectare by plot (m\u00B3/ha)'}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,font:{size:10}}},y:{beginAtZero:true}}}})];
+  });
 }
 
 function updateZoneUploadStatus() {
@@ -589,8 +619,8 @@ function runZoneCalculation() {
   var missingCols = [plotCodeCol, classCol].filter(function(c){ return plotsHdrs.indexOf(c) === -1; });
   if (missingCols.length) {
     el.innerHTML = '<p class="empty-msg" style="color:#D85A30;">&#9888; Plots CSV has no column '
-      + missingCols.map(function(c){ return '"'+c+'"'; }).join(' or ')
-      + ' (see CONFIG in js/config.js). Columns found: ' + plotsHdrs.join(', ') + '</p>';
+      + missingCols.map(function(c){ return '"'+escapeHtml(c)+'"'; }).join(' or ')
+      + ' (see CONFIG in js/config.js). Columns found: ' + escapeHtml(plotsHdrs.join(', ')) + '</p>';
     return;
   }
 
@@ -656,9 +686,9 @@ function runZoneCalculation() {
       var a   = classAccum[cls] || { count: 0, zeros: 0 };
       var eff = classAvgEff[cls];
       var note = eff.missing ? '<span style="color:#D85A30">no plots, no fallback</span>'
-               : eff.source  ? '<span style="color:#BA7517">fallback from class '+eff.source+'</span>'
+               : eff.source  ? '<span style="color:#BA7517">fallback from class '+escapeHtml(eff.source)+'</span>'
                : '';
-      return '<tr><td>'+cls+'</td><td>'+a.count+'</td><td>'+a.zeros+'</td><td>'+(eff.missing?'\u2014':fmtN(eff.avg,2))+'</td><td>'+note+'</td></tr>';
+      return '<tr><td>'+escapeHtml(cls)+'</td><td>'+a.count+'</td><td>'+a.zeros+'</td><td>'+(eff.missing?'\u2014':fmtN(eff.avg,2))+'</td><td>'+note+'</td></tr>';
     }).join('')
     +'</tbody></table>';
 
@@ -670,13 +700,13 @@ function runZoneCalculation() {
   var zoneRows = zonesRows.filter(function(r){return (r[zoneNameCol]||'').trim();});
 
   var thead = '<tr><th>Zone</th>';
-  classNames.forEach(function(cls){ thead += '<th>'+cls+' area (ha)</th><th>'+cls+' vol (m\u00B3)</th>'; });
+  classNames.forEach(function(cls){ thead += '<th>'+escapeHtml(cls)+' area (ha)</th><th>'+escapeHtml(cls)+' vol (m\u00B3)</th>'; });
   thead += '<th>Total vol (m\u00B3)</th></tr>';
 
   var tbody = zoneRows.map(function(zrow){
     var zoneName = (zrow[zoneNameCol]||'').trim();
     var zoneTotal = 0;
-    var cells = '<td><strong>'+zoneName+'</strong></td>';
+    var cells = '<td><strong>'+escapeHtml(zoneName)+'</strong></td>';
     classNames.forEach(function(cls){
       var ha  = parseNum(zrow[cls]||'0');
       var eff = classAvgEff[cls];
@@ -702,10 +732,10 @@ function runZoneCalculation() {
   var unmatchedPlots = Object.keys(plotSummary).filter(function(p){return !plotClassMap[p];});
   var warningHtml = '';
   if (unmatchedPlots.length) {
-    warningHtml = '<p style="font-size:12px;color:#D85A30;margin-top:1rem;">&#9888; '+unmatchedPlots.length+' plot(s) not found in Plots CSV and excluded: '+unmatchedPlots.join(', ')+'</p>';
+    warningHtml = '<p style="font-size:12px;color:#D85A30;margin-top:1rem;">&#9888; '+unmatchedPlots.length+' plot(s) not found in Plots CSV and excluded: '+escapeHtml(unmatchedPlots.join(', '))+'</p>';
   }
   if (unknownClasses.length) {
-    warningHtml += '<p style="font-size:12px;color:#D85A30;margin-top:0.5rem;">&#9888; Class code(s) not in CONFIG.classCodes: '+unknownClasses.join(', ')+'</p>';
+    warningHtml += '<p style="font-size:12px;color:#D85A30;margin-top:0.5rem;">&#9888; Class code(s) not in CONFIG.classCodes: '+escapeHtml(unknownClasses.join(', '))+'</p>';
   }
   warningHtml += heightNoteHtml(heightCounts(rows, cols, trees), state.heightModel);
 
@@ -764,6 +794,7 @@ function readFile(file, callback) {
   reader.onload = function(e) {
     var parsed = parseCSVText(e.target.result);
     if (!parsed) { alert('Could not parse ' + file.name); return; }
+    if (parsed.errors.length) console.warn('CSV parse warnings in ' + file.name, parsed.errors);
     callback(parsed);
   };
   reader.readAsText(file);
@@ -773,7 +804,8 @@ function readFile(file, callback) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     parseCSVText: parseCSVText, parseNum: parseNum, findCol: findCol, countBy: countBy,
-    numStats: numStats, fmtN: fmtN,
+    numStats: numStats, fmtN: fmtN, escapeHtml: escapeHtml, barChart: barChart,
+    charts: charts, switchTab: switchTab, renderDashboard: renderDashboard, resetApp: resetApp,
     detectTreeColumns: detectTreeColumns, prepareTrees: prepareTrees,
     basalArea_m2: basalArea_m2, treeVolume_m3: treeVolume_m3,
     fitNaslund: fitNaslund, naslundHeight: naslundHeight,

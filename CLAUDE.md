@@ -4,7 +4,7 @@ Static, client-side web app that analyses tree-inventory CSV exports from KoBoTo
 
 ## Running
 
-No build, no package manager. Open `index.html` in a browser (or serve the folder, e.g. `python -m http.server`). Chart.js 4.4.1 and Font Awesome load from cdnjs; Google Analytics (gtag) is embedded in `index.html`.
+No build, no package manager. Open `index.html` in a browser (or serve the folder, e.g. `python -m http.server`). Chart.js 4.4.1, PapaParse 5.6.1 (pinned, with SRI `integrity` hash) and Font Awesome load from cdnjs; Google Analytics (gtag) is embedded in `index.html`. When bumping PapaParse, update the version and integrity hash in `index.html` and replace `tests/vendor/papaparse-<version>.min.js` with the same file (tests/helpers.js requires it by name).
 
 ## Testing
 
@@ -14,16 +14,16 @@ node --test
 
 Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/*.test.js`.
 
-- `tests/fixtures/` — synthetic KoBo-style `trees.csv` (20 trees, 5 plots), `plots.csv`, `zones.csv`. Every expected value in the tests is worked out by hand in comments against these files; if you change a fixture, update those comments and values.
-- `tests/helpers.js` — installs a minimal `document`/`Chart` stub, sets `globalThis.CONFIG` from `js/config.js`, then `require`s `js/app.js` (which exports its functions via a conditional `module.exports` at the bottom — keep that block when adding functions you want to test). Volume-tab and zone results are read back from the rendered `innerHTML`. `withConfig(patch, fn)` runs a test with patched settings and restores the defaults.
-- Test files: `parse` (CSV/number parsing), `volume` (calcTrees, plot summary, Volume tab), `height` (Näslund model), `zones` (zone aggregation), `config` (settings, column errors, diameter-class table).
+- `tests/fixtures/` — synthetic KoBo-style `trees.csv` (20 trees, 5 plots; tree 18 has a quoted multi-line `Notes:` cell), `plots.csv`, `zones.csv`. Every expected value in the tests is worked out by hand in comments against these files; if you change a fixture, update those comments and values.
+- `tests/helpers.js` — installs a minimal `document` stub (class lists, tab panels) and a recording `Chart` stub (`ChartStub.instances`; throws on double destroy), sets `globalThis.Papa` from `tests/vendor/` and `globalThis.CONFIG` from `js/config.js`, then `require`s `js/app.js` (which exports its functions via a conditional `module.exports` at the bottom — keep that block when adding functions you want to test). Volume-tab and zone results are read back from the rendered `innerHTML`. `withConfig(patch, fn)` runs a test with patched settings and restores the defaults.
+- Test files: `parse` (CSV/number parsing), `volume` (calcTrees, plot summary, Volume tab), `height` (Näslund model), `zones` (zone aggregation), `config` (settings, column errors, diameter-class table), `render` (HTML escaping, chart lifecycle).
 - Known bugs are written as tests for the **correct** value with `{ todo: 'KNOWN ISSUE: …' }`; they're reported as TODO without failing the run. When you fix one, remove the `todo` option and delete or update the matching "current behaviour" test.
 
 ## Structure
 
 - `index.html` — all markup and CSS (CSS variables, dark mode via `prefers-color-scheme`). Tabs: Species, Genus, Health, Origin, Quality, Dimensions, Volume, Zones. Uses inline `onclick` handlers that call global functions in `app.js`. Loads `js/config.js` then `js/app.js`.
 - `js/config.js` — the global `CONFIG` object: every project-specific constant (see below). Put new settings here, not in app.js.
-- `js/app.js` — everything else: CSV parsing (`parseCSVText`, `parseNum`), column detection (`detectTreeColumns`, `findCol`), `prepareTrees` (detect columns + fit height model into `state`), tree metrics (`basalArea_m2`, `treeVolume_m3`, `calcTrees`, `buildPlotSummary`, `diameterClassTable`), height model (`fitNaslund`, `naslundHeight`, `fitHeightModel`, `estimateHeight`), rendering (`renderDashboard`, `renderVolumeTab`, `runZoneCalculation`), file loading. ES5 style; globals `state` (`trees`, `plots`, `zones`, `cols`, `heightModel`) and `charts`.
+- `js/app.js` — everything else: CSV parsing (`parseCSVText` wraps PapaParse; `parseNum`), column detection (`detectTreeColumns`, `findCol`), `prepareTrees` (detect columns + fit height model into `state`), tree metrics (`basalArea_m2`, `treeVolume_m3`, `calcTrees`, `buildPlotSummary`, `diameterClassTable`), height model (`fitNaslund`, `naslundHeight`, `fitHeightModel`, `estimateHeight`), rendering (`renderDashboard`, `renderVolumeTab`, `runZoneCalculation`), file loading. ES5 style; globals `state` (`trees`, `plots`, `zones`, `cols`, `heightModel`) and `charts`.
 
 ## Settings (`js/config.js`)
 
@@ -61,4 +61,7 @@ Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/
 ## Conventions
 
 - Match existing ES5 style in app.js (`var`, `function`), HTML built by string concatenation into `innerHTML`.
+- **Any CSV-derived text** (cell values, headers, plot IDs, class codes, zone names) must go through `escapeHtml()` before it is concatenated into HTML; numbers from `fmtN`/`toFixed` don't need it. `render.test.js` has hostile-input tests — extend them when adding output.
+- CSV parsing: `parseCSVText` picks `;` or `,` from the first non-blank line and passes it to PapaParse explicitly (Papa's own guessing is unreliable with decimal commas). Parse warnings (e.g. unclosed quote) are returned in `errors` and shown in the debug line for the tree file.
+- Charts: never create them directly or in `setTimeout`. Register with `setTabCharts(tab, buildFn)` (buildFn returns an array of Chart instances); it destroys the tab's old charts and draws now if the tab is visible, otherwise on `switchTab`. `resetApp` → `destroyAllCharts()`.
 - Number display: `fmtN` (non-breaking-space thousands, comma decimal).
