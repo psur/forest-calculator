@@ -1,0 +1,64 @@
+# Forest Calculator
+
+Static, client-side web app that analyses tree-inventory CSV exports from KoBoToolbox: species/health/quality breakdowns, diameter/height distributions, per-plot volume per hectare, and total standing volume per management zone.
+
+## Running
+
+No build, no package manager. Open `index.html` in a browser (or serve the folder, e.g. `python -m http.server`). Chart.js 4.4.1 and Font Awesome load from cdnjs; Google Analytics (gtag) is embedded in `index.html`.
+
+## Testing
+
+```bash
+node --test
+```
+
+Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/*.test.js`.
+
+- `tests/fixtures/` — synthetic KoBo-style `trees.csv` (20 trees, 5 plots), `plots.csv`, `zones.csv`. Every expected value in the tests is worked out by hand in comments against these files; if you change a fixture, update those comments and values.
+- `tests/helpers.js` — installs a minimal `document`/`Chart` stub, sets `globalThis.CONFIG` from `js/config.js`, then `require`s `js/app.js` (which exports its functions via a conditional `module.exports` at the bottom — keep that block when adding functions you want to test). Volume-tab and zone results are read back from the rendered `innerHTML`. `withConfig(patch, fn)` runs a test with patched settings and restores the defaults.
+- Test files: `parse` (CSV/number parsing), `volume` (calcTrees, plot summary, Volume tab), `height` (Näslund model), `zones` (zone aggregation), `config` (settings, column errors, diameter-class table).
+- Known bugs are written as tests for the **correct** value with `{ todo: 'KNOWN ISSUE: …' }`; they're reported as TODO without failing the run. When you fix one, remove the `todo` option and delete or update the matching "current behaviour" test.
+
+## Structure
+
+- `index.html` — all markup and CSS (CSS variables, dark mode via `prefers-color-scheme`). Tabs: Species, Genus, Health, Origin, Quality, Dimensions, Volume, Zones. Uses inline `onclick` handlers that call global functions in `app.js`. Loads `js/config.js` then `js/app.js`.
+- `js/config.js` — the global `CONFIG` object: every project-specific constant (see below). Put new settings here, not in app.js.
+- `js/app.js` — everything else: CSV parsing (`parseCSVText`, `parseNum`), column detection (`detectTreeColumns`, `findCol`), `prepareTrees` (detect columns + fit height model into `state`), tree metrics (`basalArea_m2`, `treeVolume_m3`, `calcTrees`, `buildPlotSummary`, `diameterClassTable`), height model (`fitNaslund`, `naslundHeight`, `fitHeightModel`, `estimateHeight`), rendering (`renderDashboard`, `renderVolumeTab`, `runZoneCalculation`), file loading. ES5 style; globals `state` (`trees`, `plots`, `zones`, `cols`, `heightModel`) and `charts`.
+
+## Settings (`js/config.js`)
+
+| Key | Default | Used for |
+|---|---|---|
+| `formFactor` | 0.441 | tree volume, all species |
+| `treePlotIdColumn` | `_parent_index` | tree CSV column linking a tree to its plot |
+| `plotsPlotIdColumn` | `null` (= first column) | plot ID column in the Plots CSV |
+| `classColumn` | `Zone SLIM` | class column in the Plots CSV; missing → error in Zones tab |
+| `classCodes` | `12`, `21`, `22` | known classes; others are flagged |
+| `classFallbacks` | `12→[21]`, `21→[22]`, `22→[21,12]` | class without plots borrows first listed class that has plots |
+| `diameterClassWidth_cm` | 5 | diameter histogram and trees/ha table |
+| `minExploitableDiameter_cm` | 30 | not used in calculations yet |
+| `heightModel.enabled` | true | estimate missing heights |
+| `heightModel.minTreesPerSpecies` | 10 | measured trees needed for a species curve (and for the all-species curve) |
+
+## Data flow
+
+1. **Tree CSV** (required): one row per tree. Detected columns: `Diameter [cm]:`, `Height [m]:`, `Bole Height [m]:`, `Species:`, `Health:`, `Origin:`, `Quality:`, `InclusionZone_ha` (plot area in ha that represents that tree), plot ID column (`CONFIG.treePlotIdColumn`). Delimiter `;` or `,` auto-detected; decimal comma supported.
+2. **Plots CSV** (Zones tab): plot ID column (`CONFIG.plotsPlotIdColumn`, default first column; values must match the tree plot IDs) and class column (`CONFIG.classColumn`).
+3. **Zones CSV** (Zones tab): first column = zone name, remaining columns = hectares per class; header names must equal the class codes.
+
+## Key formulas (app.js)
+
+- Basal area per tree: `g = π/40000 · d²` (m², d in cm)
+- Volume per tree: `v = g · h · CONFIG.formFactor`
+- Missing height (d and inclusion zone present, no height): Näslund `h = 1.3 + d² / (a + b·d)²`, fitted by OLS on `d/√(h−1.3) = a + b·d` from trees with d > 0 and h > 1.3. Per-species curve if the species has ≥ `minTreesPerSpecies` measured trees and a valid fit (a > 0, b > 0), else all-species curve, else the tree is dropped. Estimated heights are flagged on the tree (`heightEstimated`, `heightSource`), counted per plot, listed in the Volume tab and reported in Volume and Zones tabs. Dimensions-tab height statistics use measured heights only.
+- Per-tree vol/ha: `v / InclusionZone_ha`; plot vol/ha = sum over trees in the plot
+- Volume tab mean = average over the surveyed plots (`surveyedPlots`): every plot in the Plots CSV once loaded (the tab re-renders then), otherwise every plot with a row in the tree data; plots without volume count as 0. Tree-data plots missing from the Plots CSV are listed with `*` and excluded — same rule as the Zones tab, so the mean equals the plot-weighted mean of the class averages
+- Class avg vol/ha = average over **all** plots in Plots CSV of that class (plots without volume count as 0); classes without plots use `CONFIG.classFallbacks`
+- Zone volume = Σ(class ha × class avg vol/ha)
+- Diameter-class trees/ha table: each tree counts `1 / InclusionZone_ha`; class sums averaged over plots present in the tree CSV (does not yet use the Plots CSV, unlike the Volume and Zones tabs); classes `CONFIG.diameterClassWidth_cm` wide, `lo ≤ d < hi`
+- Näslund fit is OLS on the linearized form. It's slightly biased low (≈ −0.03 m with height error proportional to height; up to ≈ −0.5 m if many small trees near 1.3 m are measured with constant ±2 m error). Negligible next to prediction error at typical n; switch to a direct least-squares fit in h if that ever matters
+
+## Conventions
+
+- Match existing ES5 style in app.js (`var`, `function`), HTML built by string concatenation into `innerHTML`.
+- Number display: `fmtN` (non-breaking-space thousands, comma decimal).

@@ -24,25 +24,15 @@ open index.html
 ```
 tree-inventory-analyzer/
 ├── index.html          # Main UI
-└── js/
-    ├── app.js          # CSV parsing, column detection, chart rendering
-    └── calculations.js # Forest metrics — basal area, volume, stem density
+├── js/
+│   ├── config.js       # Settings: form factor, class column/codes/fallbacks, height model …
+│   └── app.js          # CSV parsing, calculations, rendering
+└── tests/              # node --test, with synthetic fixtures
 ```
 
-## ⚠️ Inclusion Zone — action required
+## Settings
 
-Stand-level metrics (stems/ha, basal area, volume per ha) depend on the **inclusion zone** — the area each sampled tree represents. Open `js/calculations.js` and set the `INCLUSION_ZONE` object at the top:
-
-```js
-const INCLUSION_ZONE = {
-  method: "fixed_area",   // "fixed_area" | "angle_count" | "strip"
-  plotRadius_m: 10,       // for fixed-area plots: radius in metres
-  // baf: 2,              // for Bitterlich angle-count: BAF in m²/ha
-  // stripWidth_m: 5, stripLength_m: 100,  // for strip transects
-};
-```
-
-Once set, the summary cards for stems/ha, basal area and volume will appear automatically.
+Project-specific settings live in `js/config.js` (form factor, plot-ID and class columns, class codes and fallbacks, diameter class width, height–diameter model). The area each tree represents comes from the `InclusionZone_ha` column of the tree CSV.
 
 ## Column naming
 
