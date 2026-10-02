@@ -27,6 +27,10 @@ var CONFIG = {
   // Minimum exploitable (merchantable) diameter, cm — not used in calculations yet
   minExploitableDiameter_cm: 30,
 
+  // CSV export of result tables ("Download CSV"; "Copy" uses tabs and the same decimal separator)
+  exportDelimiter: ',',
+  exportDecimalSeparator: '.',
+
   // Estimate missing heights from a Näslund height–diameter curve
   heightModel: {
     enabled: true,

@@ -254,7 +254,7 @@ test('species analysis: summary, vol/ha class table and zone tables only', () =>
 test('species analysis: summary table', () => {
   const { summary } = renderedTables();
   assert.deepEqual(summary[0], ['Species', 'Trees (sample)', 'Trees/ha', 'Basal area (m²/ha)',
-    'Volume in sample (m³)', 'Vol/ha (m³/ha)', 'Share of vol/ha', 'Vol/ha ≥ 30 cm']);
+    'Volume in sample (m³)', 'Vol/ha (m³/ha)', 'Share of vol/ha (%)', 'Vol/ha ≥ 30 cm (m³/ha)']);
   assert.deepEqual(summary[1], ['Abies alba', '3', '10,3', '0,67', '3,871', '8,21', '27,4 %', '7,34']);
   assert.deepEqual(summary[6], ['Total', '18', '170,8', '3,08', '13,076', '29,91', '100,0 %', '22,12']);
 });

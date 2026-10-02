@@ -16,7 +16,7 @@ Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/
 
 - `tests/fixtures/` — synthetic KoBo-style `trees.csv` (20 trees, 5 plots; tree 18 has a quoted multi-line `Notes:` cell), `plots.csv`, `zones.csv`. Every expected value in the tests is worked out by hand in comments against these files; if you change a fixture, update those comments and values.
 - `tests/helpers.js` — installs a minimal `document` stub (class lists, tab panels) and a recording `Chart` stub (`ChartStub.instances`; throws on double destroy), sets `globalThis.Papa` from `tests/vendor/` and `globalThis.CONFIG` from `js/config.js`, then `require`s `js/app.js` (which exports its functions via a conditional `module.exports` at the bottom — keep that block when adding functions you want to test). Volume-tab and zone results are read back from the rendered `innerHTML`. `withConfig(patch, fn)` runs a test with patched settings and restores the defaults.
-- Test files: `parse` (CSV/number parsing), `volume` (calcTrees, plot summary, Volume tab), `height` (Näslund model), `zones` (zone aggregation), `config` (settings, column errors, diameter-class table), `render` (HTML escaping, chart lifecycle), `species` (species analysis, totals cross-checks, species values).
+- Test files: `parse` (CSV/number parsing), `volume` (calcTrees, plot summary, Volume tab), `height` (Näslund model), `zones` (zone aggregation), `config` (settings, column errors, diameter-class table), `render` (HTML escaping, chart lifecycle), `species` (species analysis, totals cross-checks, species values), `export` (CSV/TSV output, file names, buttons on every table, Copy feedback).
 - Known bugs are written as tests for the **correct** value with `{ todo: 'KNOWN ISSUE: …' }`; they're reported as TODO without failing the run. When you fix one, remove the `todo` option and delete or update the matching "current behaviour" test.
 
 ## Structure
@@ -37,6 +37,8 @@ Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/
 | `classFallbacks` | `12→[21]`, `21→[22]`, `22→[21,12]` | class without plots borrows first listed class that has plots |
 | `diameterClassWidth_cm` | 5 | diameter histogram and trees/ha table |
 | `minExploitableDiameter_cm` | 30 | splits species tables / chart into regeneration (< 30) and exploitable (≥ 30); diameter class edges are laid on a grid through it |
+| `exportDelimiter` | `,` | CSV download delimiter |
+| `exportDecimalSeparator` | `.` | decimal separator in CSV download and Copy |
 | `heightModel.enabled` | true | estimate missing heights |
 | `heightModel.minTreesPerSpecies` | 10 | measured trees needed for a species curve (and for the all-species curve) |
 
@@ -70,5 +72,6 @@ Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/
 - Charts: never create them directly or in `setTimeout`. Register with `setTabCharts(tab, buildFn)` (buildFn returns an array of Chart instances); it destroys the tab's old charts and draws now if the tab is visible, otherwise on `switchTab`. `resetApp` → `destroyAllCharts()`.
 - Number display: `fmtN` (non-breaking-space thousands, comma decimal).
 - **Species values**: always read them with `speciesOf(row, col)` (trimmed value; blank → `NOT_RECORDED` = "(not recorded)") and count them with `speciesCounts` — no filtering, numeric values such as "7" included everywhere (Species/Genus tabs, summary card, species analysis). `speciesNumber` excludes "(not recorded)" from the species count; it still appears as a row and in totals. Numeric values get `numericSpeciesWarningHtml` (likely KoBo choice codes). Health/Origin/Quality still use `countBy`, which hides numeric values.
+- **Result tables**: never build `<table>` HTML by hand. Build a table model and render it with `tableHtml(model)` — it escapes all text, adds the "Download CSV" / "Copy" buttons and registers the model in `exportTables` (by `id`). Export (`tableToCSV`, `tableToTSV`) reads the model, never the page. Model: `{ id, title, fileBase, scroll?, marginTop?, columns: [{ label, unit?, unitExportOnly?, dec?, fmt? }], rows: [{ kind: 'data'|'subtotal'|'total'|'group', cls?, style?, label?, cells }] }`; header = "label (unit)"; a cell is a number/string or `{ v, dec?, html?, strong?, em?, text? }` — `v` is what gets exported (numbers rounded to the column's `dec`, plain, `CONFIG.exportDecimalSeparator`), `html` changes only the page display. Group rows are page headings and are not exported; subtotal/total rows are. CSV: UTF-8 BOM, CRLF, quoting of delimiter/quotes/line breaks/edge spaces, formula-looking text prefixed with `'`; file name `fileBase_YYYY-MM-DD.csv`.
 - Counting by value: use `countValues` (Map-based). Plain objects enumerate integer-like keys ("7") first, which breaks the tie order.
 - Line endings: `.gitattributes` stores js/html/css/md/csv/json with LF.

@@ -92,6 +92,15 @@
     table.summary tr.subtotal td { font-weight: 600; border-top: 1px solid var(--border-strong); }
     .table-note { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
+    /* Table title row with Download CSV / Copy buttons */
+    .table-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 1.5rem 0 0.75rem; }
+    .table-head:first-child { margin-top: 0; }
+    .table-head .section-title { margin: 0; }
+    .table-actions { display: flex; gap: 6px; }
+    .tbl-btn { font-size: 11px; padding: 2px 9px; cursor: pointer; background: none; border: 0.5px solid var(--border-strong); border-radius: 5px; color: var(--text-muted); font-family: inherit; }
+    .tbl-btn:hover:not(:disabled) { background: var(--bg-secondary); color: var(--text); }
+    .tbl-btn:disabled { color: var(--accent2); border-color: var(--accent2); cursor: default; }
+
     /* Zone upload panel */
     .zone-upload-panel { border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.5rem; }
     .zone-upload-panel h3 { font-size: 14px; font-weight: 500; margin-bottom: 1rem; }

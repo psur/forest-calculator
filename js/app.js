@@ -95,6 +95,7 @@ function resetApp() {
   state.trees = state.plots = state.zones = state.heightModel = null;
   state.cols = {};
   destroyAllCharts();
+  Object.keys(exportTables).forEach(function(id){ delete exportTables[id]; });
   document.getElementById('dashboard').style.display = 'none';
   document.getElementById('upload-section').style.display = '';
   document.getElementById('file-input').value = '';
@@ -212,6 +213,173 @@ function fmtN(n, dec) {
   var parts = fixed.split('.');
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
   return (d > 0) ? parts[0] + ',' + parts[1] : parts[0];
+}
+
+// ── Result tables: one model for page, CSV download and copy ─────────────────
+//
+// Every result table is built as a model and rendered with tableHtml(), which
+// adds "Download CSV" / "Copy" buttons; export reads the model, never the HTML.
+//
+//   { id, title, fileBase, scroll?, marginTop?,
+//     columns: [{ label, unit?, unitExportOnly?, dec?, fmt? }],
+//     rows:    [{ kind: 'data'|'subtotal'|'total'|'group', cls?, style?, label? (group), cells: [...] }] }
+//
+// column: header = "label (unit)" (unitExportOnly: unit only in exports);
+//   dec = decimals for numbers; fmt: 'fmtN' (default, page style "1 234,5"),
+//   'fixed' (toFixed, as some older tables show), 'raw' (number as is).
+// cell: a number or string, or { v, dec?, html?, strong?, em?, text? }:
+//   v is the exported value (numbers rounded to dec, plain); html overrides only
+//   the page display (e.g. "·" for 0, "27,4 %"); text overrides a string export.
+// Group rows are visual headings (not exported); subtotal/total rows are.
+
+var exportTables = {};   // table id → model of the table currently on the page
+
+function cellObj(cell) {
+  return (cell !== null && typeof cell === 'object') ? cell : { v: cell };
+}
+
+function colHeader(col, forExport) {
+  return col.unit && (forExport || !col.unitExportOnly) ? col.label + ' (' + col.unit + ')' : col.label;
+}
+
+function cellDisplayHtml(cell, col) {
+  var o = cellObj(cell), dec = o.dec !== undefined ? o.dec : col.dec, s;
+  if (o.html !== undefined) s = o.html;
+  else if (typeof o.v === 'number') {
+    s = col.fmt === 'fixed' ? o.v.toFixed(dec)
+      : (col.fmt === 'raw' || dec === undefined) ? String(o.v)
+      : fmtN(o.v, dec);
+  }
+  else s = escapeHtml(o.v === null || o.v === undefined ? '' : o.v);
+  if (o.em) s = '<em>' + s + '</em>';
+  if (o.strong) s = '<strong>' + s + '</strong>';
+  return s;
+}
+
+/** Export text of one cell: plain number rounded like the page, or text. */
+function cellExportValue(cell, col, decSep) {
+  var o = cellObj(cell), dec = o.dec !== undefined ? o.dec : col.dec;
+  if (typeof o.v === 'number') {
+    if (!isFinite(o.v)) return '';
+    var s = (col.fmt === 'raw' || dec === undefined) ? String(o.v) : o.v.toFixed(dec);
+    if (Number(s) === 0) s = s.replace('-', '');          // "-0.00" → "0.00"
+    return decSep === '.' ? s : s.replace('.', decSep);
+  }
+  var t = o.text !== undefined ? o.text : o.v;
+  return t === null || t === undefined ? '' : String(t);
+}
+
+/** Header row + exported rows (data, subtotal, total) as arrays of strings. */
+function tableExportRows(t, decSep) {
+  var out = [t.columns.map(function(c){ return colHeader(c, true); })];
+  t.rows.forEach(function(r) {
+    if (r.kind === 'group') return;
+    out.push(t.columns.map(function(c, i){ return cellExportValue(r.cells[i], c, decSep); }));
+  });
+  return out;
+}
+
+/** Text that a spreadsheet would run as a formula gets a leading apostrophe. */
+function guardFormula(s) {
+  return /^[=+\-@\t\r]/.test(s) && isNaN(Number(s)) ? "'" + s : s;
+}
+
+/**
+ * CSV per CONFIG.exportDelimiter / exportDecimalSeparator: UTF-8 BOM (so Excel
+ * reads ≥ and ³), CRLF line ends, fields quoted when they contain the
+ * delimiter, quotes, line breaks or leading/trailing spaces.
+ */
+function tableToCSV(t) {
+  var delim = CONFIG.exportDelimiter;
+  function field(s) {
+    s = guardFormula(s);
+    return (s.indexOf(delim) >= 0 || /["\r\n]/.test(s) || /^\s|\s$/.test(s)) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  return String.fromCharCode(0xFEFF)
+    + tableExportRows(t, CONFIG.exportDecimalSeparator).map(function(r){ return r.map(field).join(delim); }).join('\r\n') + '\r\n';
+}
+
+/** Tab-separated text for pasting into Excel / Word (tabs and line breaks inside cells become spaces). */
+function tableToTSV(t) {
+  return tableExportRows(t, CONFIG.exportDecimalSeparator).map(function(r) {
+    return r.map(function(s){ return guardFormula(s).replace(/[\t\r\n]+/g, ' '); }).join('\t');
+  }).join('\n') + '\n';
+}
+
+/** "YYYY-MM-DD" in local time. */
+function dateStamp(d) {
+  function p(n) { return (n < 10 ? '0' : '') + n; }
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function exportFileName(t, date) {
+  return t.fileBase + '_' + dateStamp(date || new Date()) + '.csv';
+}
+
+/** Section title with Download CSV / Copy buttons, then the table. Registers the model for export. */
+function tableHtml(t) {
+  exportTables[t.id] = t;
+  var ncol = t.columns.length, id = escapeHtml(t.id);
+  var head = '<div class="table-head"' + (t.marginTop ? ' style="margin-top:' + t.marginTop + '"' : '') + '>'
+    + '<div class="section-title">' + escapeHtml(t.title) + '</div>'
+    + '<div class="table-actions">'
+    + '<button type="button" class="tbl-btn" onclick="downloadTable(\'' + id + '\')">Download CSV</button>'
+    + '<button type="button" class="tbl-btn" onclick="copyTable(\'' + id + '\', this)">Copy</button>'
+    + '</div></div>';
+  var body = t.rows.map(function(r) {
+    if (r.kind === 'group') {
+      return '<tr class="group-head' + (r.cls ? ' ' + r.cls : '') + '"><td colspan="' + ncol + '">' + escapeHtml(r.label) + '</td></tr>';
+    }
+    return '<tr' + (r.cls ? ' class="' + r.cls + '"' : '') + (r.style ? ' style="' + r.style + '"' : '') + '>'
+      + t.columns.map(function(c, i){ return '<td>' + cellDisplayHtml(r.cells[i], c) + '</td>'; }).join('') + '</tr>';
+  }).join('');
+  var table = '<table class="summary"><thead><tr>'
+    + t.columns.map(function(c){ return '<th>' + escapeHtml(colHeader(c, false)) + '</th>'; }).join('')
+    + '</tr></thead><tbody>' + body + '</tbody></table>';
+  return head + (t.scroll ? '<div class="zone-table-wrap">' + table + '</div>' : table);
+}
+
+function downloadTable(id) {
+  var t = exportTables[id]; if (!t) return;
+  var url = URL.createObjectURL(new Blob([tableToCSV(t)], { type: 'text/csv;charset=utf-8' }));
+  var a = document.createElement('a');
+  a.href = url; a.download = exportFileName(t);
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+}
+
+/**
+ * Copy a table as tab-separated text. The synchronous copy runs first (works
+ * within the click, no permission prompt); the async Clipboard API is the
+ * fallback, with a timeout so the button always gives feedback.
+ */
+function copyTable(id, btn) {
+  var t = exportTables[id]; if (!t) return;
+  var text = tableToTSV(t);
+  function done(ok) {
+    if (!btn) return;
+    btn.textContent = ok ? 'Copied' : 'Copy failed';
+    btn.disabled = true;
+    setTimeout(function(){ btn.textContent = 'Copy'; btn.disabled = false; }, 1500);
+  }
+  function execCopy() {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  if (execCopy()) { done(true); return; }
+  if (navigator.clipboard && window.isSecureContext) {
+    var settled = false;
+    var settle = function(ok) { if (!settled) { settled = true; done(ok); } };
+    navigator.clipboard.writeText(text).then(function(){ settle(true); }, function(){ settle(false); });
+    setTimeout(function(){ settle(false); }, 2000);   // e.g. permission prompt left open
+  } else {
+    done(false);
+  }
 }
 
 // ── Tree columns ─────────────────────────────────────────────────────────────
@@ -478,12 +646,20 @@ function renderDashboard(parsed, fileName) {
     document.getElementById('tab-genus').innerHTML = '<p class="empty-msg">Species column not found.</p>';
   }
 
-  var tbody = '';
-  if (ds) tbody+='<tr><td>Diameter (cm)</td><td>'+ds.n+'</td><td>'+ds.min+'</td><td>'+ds.max+'</td><td>'+ds.mean.toFixed(1)+'</td><td>'+ds.median.toFixed(1)+'</td></tr>';
-  if (hs) tbody+='<tr><td>Height (m)</td><td>'+hs.n+'</td><td>'+hs.min+'</td><td>'+hs.max+'</td><td>'+hs.mean.toFixed(1)+'</td><td>'+hs.median.toFixed(1)+'</td></tr>';
-  if (boles.length){var bs=numStats(boles);tbody+='<tr><td>Bole height (m)</td><td>'+bs.n+'</td><td>'+bs.min+'</td><td>'+bs.max+'</td><td>'+bs.mean.toFixed(1)+'</td><td>'+bs.median.toFixed(1)+'</td></tr>';}
-  document.getElementById('dims-stats').innerHTML = tbody
-    ? '<table class="summary"><thead><tr><th>Metric</th><th>n</th><th>Min</th><th>Max</th><th>Mean</th><th>Median</th></tr></thead><tbody>'+tbody+'</tbody></table>'
+  var statRows = [];
+  function statRow(label, st) {
+    statRows.push({ kind: 'data', cells: [label, st.n, st.min, st.max, st.mean, st.median] });
+  }
+  if (ds) statRow('Diameter (cm)', ds);
+  if (hs) statRow('Height (m)', hs);
+  if (boles.length) statRow('Bole height (m)', numStats(boles));
+  document.getElementById('dims-stats').innerHTML = statRows.length
+    ? tableHtml({
+        id: 'dimension-stats', title: 'Diameter and height statistics', fileBase: 'diameter-height-statistics',
+        columns: [{ label: 'Metric' }, { label: 'n', dec: 0 }, { label: 'Min', fmt: 'raw' }, { label: 'Max', fmt: 'raw' },
+                  { label: 'Mean', dec: 1, fmt: 'fixed' }, { label: 'Median', dec: 1, fmt: 'fixed' }],
+        rows: statRows
+      })
     : '<p class="empty-msg">No numeric dimension data found.</p>';
 
   renderVolumeTab(rows, cols, state.heightModel, state.plots);
@@ -539,18 +715,17 @@ function renderDiameterClassTable(rows, cols, plotsParsed) {
   var dc = diameterClassTable(rows, cols, CONFIG.diameterClassWidth_cm, survey.ids);
   if (!dc.classes.length) { el.innerHTML = '<p class="empty-msg">No plot data found.</p>'; return; }
 
-  el.innerHTML =
-    '<div class="section-title" style="margin-top:1.5rem;">Estimated trees per hectare by diameter class</div>'
-    + '<table class="summary"><thead><tr>'
-    + '<th>Diameter class</th><th>Avg trees\u2009/\u2009plot</th><th>Trees\u2009/\u2009ha</th>'
-    + '</tr></thead><tbody>'
-    + dc.classes.map(function(c) {
-        return '<tr><td>' + c.lo + ' \u2013 ' + c.hi + ' cm</td><td>' + c.avgRaw.toFixed(3)
-          + '</td><td><strong>' + c.treesHa + '</strong></td></tr>';
-      }).join('')
-    + '<tr class="total-row"><td><strong>TOTAL</strong></td><td></td>'
-    + '<td><strong>' + dc.totalTreesHa + '</strong></td></tr>'
-    + '</tbody></table>'
+  var thin = String.fromCharCode(0x2009), dash = String.fromCharCode(0x2013);
+  el.innerHTML = tableHtml({
+      id: 'trees-per-ha-by-diameter-class', title: 'Estimated trees per hectare by diameter class',
+      fileBase: 'trees-per-ha-by-diameter-class',
+      columns: [{ label: 'Diameter class' }, { label: 'Avg trees' + thin + '/' + thin + 'plot', dec: 3, fmt: 'fixed' },
+                { label: 'Trees' + thin + '/' + thin + 'ha', dec: 0 }],
+      rows: dc.classes.map(function(c) {
+          return { kind: 'data', cells: [c.lo + ' ' + dash + ' ' + c.hi + ' cm', c.avgRaw, { v: c.treesHa, strong: true }] };
+        }).concat([{ kind: 'total', cls: 'total-row',
+          cells: [{ v: 'TOTAL', strong: true }, null, { v: dc.totalTreesHa, strong: true }] }])
+    })
     + '<p style="font-size:11px;color:#888;margin-top:4px;">Based on ' + dc.nPlots
     + ' plot(s)' + (survey.source === 'plots' ? ' in the Plots CSV' : '')
     + '. Each tree counts as 1\u2009/\u2009InclusionZone_ha trees/ha; plots with no trees in a class contribute 0 to the average.'
@@ -632,14 +807,18 @@ function renderVolumeTab(rows, cols, heightModel, plotsParsed) {
     +'<div class="stat-card"><div class="label">Heights estimated</div><div class="value">'+hc.estimated+'</div></div>'
     +(hc.excluded ? '<div class="stat-card"><div class="label">Excluded (no height)</div><div class="value">'+hc.excluded+'</div></div>' : '')
     +'</div>'
-    +'<div class="section-title">Volume per hectare by plot</div>'
-    +'<table class="summary"><thead><tr><th>Plot</th><th>Trees</th><th>Basal area (m\u00B2)</th><th>Volume (m\u00B3)</th><th>Vol/ha (m\u00B3/ha)</th><th>Est. heights</th></tr></thead><tbody>'
-    +plotIds.map(function(p){
-      var d = plots[p] || zero;
-      var label = escapeHtml(p) + (inSurvey[p] ? '' : ' *');
-      return '<tr'+(plots[p]?'':' style="color:var(--text-muted)"')+'><td>'+label+'</td><td>'+d.trees+'</td><td>'+d.totalBA.toFixed(4)+'</td><td>'+d.totalVol.toFixed(3)+'</td><td><strong>'+fmtN(d.totalVolHa,2)+'</strong></td><td>'+(d.estHeights?'<em>'+d.estHeights+'</em>':'0')+'</td></tr>';
-    }).join('')
-    +'</tbody></table>'
+    +tableHtml({
+      id: 'volume-by-plot', title: 'Volume per hectare by plot', fileBase: 'volume-by-plot',
+      columns: [{ label: 'Plot' }, { label: 'Trees', dec: 0 },
+                { label: 'Basal area', unit: 'm\u00B2', dec: 4, fmt: 'fixed' }, { label: 'Volume', unit: 'm\u00B3', dec: 3, fmt: 'fixed' },
+                { label: 'Vol/ha', unit: 'm\u00B3/ha', dec: 2 }, { label: 'Est. heights', dec: 0 }],
+      rows: plotIds.map(function(p) {
+        var d = plots[p] || zero;
+        return { kind: 'data', style: plots[p] ? '' : 'color:var(--text-muted)',
+                 cells: [p + (inSurvey[p] ? '' : ' *'), d.trees, d.totalBA, d.totalVol, { v: d.totalVolHa, strong: true },
+                         d.estHeights ? { v: d.estHeights, em: true } : 0] };
+      })
+    })
     +'<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">'+meanNote+'</p>'
     +heightNoteHtml(hc, heightModel);
 
@@ -761,17 +940,23 @@ var ZERO_CELL = '<span style="opacity:.35">·</span>';
 
 function speciesSummaryHtml(sa) {
   var minX = CONFIG.minExploitableDiameter_cm;
-  function row(x, cls) {
-    return '<tr'+(cls ? ' class="'+cls+'"' : '')+'><td>'+escapeHtml(x.name)+'</td><td>'+x.n+'</td><td>'+fmtN(x.treesHa,1)
-      +'</td><td>'+fmtN(x.baHa,2)+'</td><td>'+fmtN(x.vol,3)+'</td><td><strong>'+fmtN(x.volHa,2)+'</strong></td><td>'
-      +fmtN(100*x.volShare,1)+' %</td>'+(minX != null ? '<td>'+fmtN(x.volHaExpl,2)+'</td>' : '')+'</tr>';
+  var nbsp = String.fromCharCode(0xA0);
+  var columns = [{ label: 'Species' }, { label: 'Trees (sample)', dec: 0 }, { label: 'Trees/ha', dec: 1 },
+                 { label: 'Basal area', unit: 'm²/ha', dec: 2 }, { label: 'Volume in sample', unit: 'm³', dec: 3 },
+                 { label: 'Vol/ha', unit: 'm³/ha', dec: 2 }, { label: 'Share of vol/ha', unit: '%', dec: 1 }];
+  if (minX != null) columns.push({ label: 'Vol/ha ≥ ' + minX + ' cm', unit: 'm³/ha', dec: 2 });
+  function row(x, kind) {
+    var share = 100 * x.volShare;
+    var cells = [x.name, x.n, x.treesHa, x.baHa, x.vol, { v: x.volHa, strong: true },
+                 { v: share, html: fmtN(share, 1) + nbsp + '%' }];
+    if (minX != null) cells.push(x.volHaExpl);
+    return { kind: kind, cls: kind === 'total' ? 'total-row' : '', cells: cells };
   }
-  return '<div class="section-title">Volume, stems and basal area per species</div>'
-    +'<div class="zone-table-wrap"><table class="summary"><thead><tr><th>Species</th><th>Trees (sample)</th><th>Trees/ha</th>'
-    +'<th>Basal area (m²/ha)</th><th>Volume in sample (m³)</th><th>Vol/ha (m³/ha)</th><th>Share of vol/ha</th>'
-    +(minX != null ? '<th>Vol/ha ≥ '+minX+' cm</th>' : '')+'</tr></thead><tbody>'
-    +sa.species.map(function(s){ return row(s); }).join('') + row(sa.total, 'total-row')
-    +'</tbody></table></div>'
+  return tableHtml({
+      id: 'species-summary', title: 'Volume, stems and basal area per species', fileBase: 'species-summary', scroll: true,
+      columns: columns,
+      rows: sa.species.map(function(s){ return row(s, 'data'); }).concat([row(sa.total, 'total')])
+    })
     +'<p class="table-note">Mean over the '+sa.nPlots+' plot(s) '
     +(sa.source === 'plots' ? 'in the Plots CSV' : 'in the tree data (load the Plots CSV in the Zones tab to include plots without tree rows)')
     +'; per hectare = Σ(value ÷ InclusionZone_ha) ÷ plots. Share is of the total vol/ha.'
@@ -785,46 +970,51 @@ function speciesSummaryHtml(sa) {
  * Volume per hectare by species and diameter class: classes as rows, species
  * (+ Total) as columns, grouped below / at-or-above the minimum exploitable
  * diameter with subtotals.
- * Per-cell output goes through classCell() (class rows) and sumCell() (subtotal
- * and total rows) — the places to add extras such as confidence intervals.
+ * Per-cell values come from classCell() (class rows) and sumCell() (subtotal and
+ * total rows) — the places to add extras such as confidence intervals (add a
+ * column per species, or richer cell objects; export picks them up from the model).
  */
-function speciesVolClassTableHtml(sa) {
+function speciesVolClassTable(sa) {
   var minX = CONFIG.minExploitableDiameter_cm, cols = sa.species.concat([sa.total]);
-  var ncol = cols.length + 1;
   // x: one species (or sa.total); i: class index; from..to-1: class range
   function classCell(x, i) {
     var v = x.classVolHa[i];
-    return Math.abs(v) < 1e-12 ? ZERO_CELL : fmtN(v, 2);
+    return Math.abs(v) < 1e-12 ? { v: 0, html: ZERO_CELL } : { v: v };
   }
   function sumCell(x, from, to) {
     var s = 0;
     for (var i = from; i < to; i++) s += x.classVolHa[i];
-    return fmtN(s, 2);
+    return s;
   }
   function classRow(i, cls) {
-    return '<tr'+(cls ? ' class="'+cls+'"' : '')+'><td>'+sa.classes[i].lo+' – '+sa.classes[i].hi+' cm</td>'
-      +cols.map(function(x, j){ var v = classCell(x, i); return '<td>'+(j === cols.length-1 ? '<strong>'+v+'</strong>' : v)+'</td>'; }).join('')+'</tr>';
+    return { kind: 'data', cls: cls, cells: [sa.classes[i].lo + ' – ' + sa.classes[i].hi + ' cm'].concat(
+      cols.map(function(x, j){ var c = classCell(x, i); c.strong = j === cols.length - 1; return c; })) };
   }
-  function sumRow(label, from, to, cls) {
-    return '<tr class="'+cls+'"><td>'+label+'</td>'+cols.map(function(x){ return '<td>'+sumCell(x, from, to)+'</td>'; }).join('')+'</tr>';
+  function sumRow(kind, label, from, to, cls) {
+    return { kind: kind, cls: cls, cells: [label].concat(cols.map(function(x){ return sumCell(x, from, to); })) };
   }
-  function head(label, cls) { return '<tr class="group-head '+cls+'"><td colspan="'+ncol+'">'+label+'</td></tr>'; }
-  var n = sa.classes.length, k = sa.splitIndex, body = '', i;
+  var n = sa.classes.length, k = sa.splitIndex, rows = [], i;
   if (minX === null || minX === undefined) {
-    for (i = 0; i < n; i++) body += classRow(i);
+    for (i = 0; i < n; i++) rows.push(classRow(i));
   } else {
-    body += head('Below '+minX+' cm — regeneration potential', '');
-    for (i = 0; i < k; i++) body += classRow(i);
-    body += sumRow('Subtotal &lt; '+minX+' cm', 0, k, 'subtotal');
-    body += head('≥ '+minX+' cm — exploitable', 'expl-head');
-    for (i = k; i < n; i++) body += classRow(i, 'expl');
-    body += sumRow('Subtotal ≥ '+minX+' cm', k, n, 'subtotal expl');
+    rows.push({ kind: 'group', label: 'Below ' + minX + ' cm — regeneration potential' });
+    for (i = 0; i < k; i++) rows.push(classRow(i));
+    rows.push(sumRow('subtotal', 'Subtotal < ' + minX + ' cm', 0, k, 'subtotal'));
+    rows.push({ kind: 'group', cls: 'expl-head', label: '≥ ' + minX + ' cm — exploitable' });
+    for (i = k; i < n; i++) rows.push(classRow(i, 'expl'));
+    rows.push(sumRow('subtotal', 'Subtotal ≥ ' + minX + ' cm', k, n, 'subtotal expl'));
   }
-  body += sumRow('<strong>TOTAL</strong>', 0, n, 'total-row');
-  return '<div class="section-title" style="margin-top:1.5rem;">Volume per hectare (m³/ha) by species and diameter class</div>'
-    +'<div class="zone-table-wrap"><table class="summary"><thead><tr><th>Diameter class</th>'
-    +sa.species.map(function(s){ return '<th>'+escapeHtml(s.name)+'</th>'; }).join('')+'<th>Total</th></tr></thead><tbody>'
-    +body+'</tbody></table></div>';
+  var total = sumRow('total', '', 0, n, 'total-row');
+  total.cells[0] = { v: 'TOTAL', strong: true };
+  rows.push(total);
+  return {
+    id: 'volume-by-species-diameter-class', title: 'Volume per hectare (m³/ha) by species and diameter class',
+    fileBase: 'volume-by-species-diameter-class', scroll: true,
+    columns: [{ label: 'Diameter class' }].concat(cols.map(function(x) {
+      return { label: x === sa.total ? 'Total' : x.name, unit: 'm³/ha', unitExportOnly: true, dec: 2 };
+    })),
+    rows: rows
+  };
 }
 
 function speciesZonesHtml(sa) {
@@ -835,20 +1025,25 @@ function speciesZonesHtml(sa) {
   var zv = speciesZoneVolumes(sa, state.plots, state.zones);
   if (zv.error) return '<p class="empty-msg" style="color:#D85A30;">'+zv.error+'</p>';
   var minX = CONFIG.minExploitableDiameter_cm;
-  function table(key, title) {
-    function row(x, cls) {
+  function table(key, id, title, fileBase) {
+    function row(x, kind) {
       var sum = x[key].reduce(function(a, b){ return a + b; }, 0);
-      return '<tr'+(cls ? ' class="'+cls+'"' : '')+'><td>'+escapeHtml(x.name)+'</td>'
-        +x[key].map(function(v){ return '<td>'+fmtN(v,0)+'</td>'; }).join('')+'<td><strong>'+fmtN(sum,0)+'</strong></td></tr>';
+      return { kind: kind, cls: kind === 'total' ? 'total-row' : '',
+               cells: [x.name].concat(x[key], [{ v: sum, strong: true }]) };
     }
-    return '<div class="section-title" style="margin-top:1.5rem;">'+title+'</div>'
-      +'<div class="zone-table-wrap"><table class="summary"><thead><tr><th>Species</th>'
-      +zv.zones.map(function(z){ return '<th>'+escapeHtml(z)+'</th>'; }).join('')+'<th>Total</th></tr></thead><tbody>'
-      +zv.species.map(function(s){ return row(s); }).join('') + row(zv.total, 'total-row')
-      +'</tbody></table></div>';
+    return tableHtml({
+      id: id, title: title, fileBase: fileBase, scroll: true,
+      columns: [{ label: 'Species' }].concat(zv.zones.map(function(z) {
+        return { label: z, unit: 'm³', unitExportOnly: true, dec: 0 };
+      }), [{ label: 'Total', unit: 'm³', unitExportOnly: true, dec: 0 }]),
+      rows: zv.species.map(function(s){ return row(s, 'data'); }).concat([row(zv.total, 'total')])
+    });
   }
-  return table('all', 'Total volume per species and zone (m³) — all trees')
-    +(minX != null ? table('expl', 'Total volume per species and zone (m³) — trees ≥ '+minX+' cm') : '')
+  return table('all', 'volume-by-species-and-zone', 'Total volume per species and zone (m³) — all trees',
+               'volume-by-species-and-zone')
+    +(minX != null ? table('expl', 'volume-by-species-and-zone-exploitable',
+                           'Total volume per species and zone (m³) — trees ≥ ' + minX + ' cm',
+                           'volume-by-species-and-zone-from-' + minX + 'cm') : '')
     +'<p class="table-note">Zone volume = Σ over classes of class area (ha) × species vol/ha of the class, '
     +'averaged over all plots of the class in the Plots CSV (classes without plots use the same fallbacks as the Zones tab).</p>';
 }
@@ -863,7 +1058,7 @@ function renderSpeciesAnalysis() {
   var sa = speciesAnalysis(state.trees.rows, cols, state.heightModel, state.plots);
   if (!sa.species.length) { el.innerHTML = '<p class="empty-msg">No trees with diameter and inclusion zone.</p>'; return; }
   el.innerHTML = '<div style="margin-top:2rem;">' + speciesSummaryHtml(sa) + '</div>'
-    + speciesVolClassTableHtml(sa)
+    + tableHtml(speciesVolClassTable(sa))
     + speciesZonesHtml(sa);
 }
 
@@ -982,17 +1177,20 @@ function runZoneCalculation() {
   });
 
   // Class summary table
-  var classHtml = '<div class="section-title">Average volume per hectare by class</div>'
-    +'<table class="summary"><thead><tr><th>Class</th><th>Plots (total)</th><th>Empty plots (0 m\u00B3/ha)</th><th>Avg vol/ha (m\u00B3/ha)</th><th>Note</th></tr></thead><tbody>'
-    +classNames.map(function(cls){
+  var classHtml = tableHtml({
+    id: 'volume-by-class', title: 'Average volume per hectare by class', fileBase: 'volume-by-class',
+    columns: [{ label: 'Class' }, { label: 'Plots (total)', dec: 0 }, { label: 'Empty plots (0 m\u00B3/ha)', dec: 0 },
+              { label: 'Avg vol/ha', unit: 'm\u00B3/ha', dec: 2 }, { label: 'Note' }],
+    rows: classNames.map(function(cls) {
       var a   = classAccum[cls] || { count: 0, zeros: 0 };
       var eff = classAvgEff[cls];
-      var note = eff.missing ? '<span style="color:#D85A30">no plots, no fallback</span>'
-               : eff.source  ? '<span style="color:#BA7517">fallback from class '+escapeHtml(eff.source)+'</span>'
+      var note = eff.missing ? { v: 'no plots, no fallback', html: '<span style="color:#D85A30">no plots, no fallback</span>' }
+               : eff.source  ? { v: 'fallback from class ' + eff.source,
+                                 html: '<span style="color:#BA7517">fallback from class ' + escapeHtml(eff.source) + '</span>' }
                : '';
-      return '<tr><td>'+escapeHtml(cls)+'</td><td>'+a.count+'</td><td>'+a.zeros+'</td><td>'+(eff.missing?'\u2014':fmtN(eff.avg,2))+'</td><td>'+note+'</td></tr>';
-    }).join('')
-    +'</tbody></table>';
+      return { kind: 'data', cells: [cls, a.count, a.zeros, eff.missing ? { v: null, html: '\u2014' } : eff.avg, note] };
+    })
+  });
 
   // Zone x class table
   var grandTotal = 0;
@@ -1001,34 +1199,40 @@ function runZoneCalculation() {
 
   var zoneRows = zones.rows;
 
-  var thead = '<tr><th>Zone</th>';
-  classNames.forEach(function(cls){ thead += '<th>'+escapeHtml(cls)+' area (ha)</th><th>'+escapeHtml(cls)+' vol (m\u00B3)</th>'; });
-  thead += '<th>Total vol (m\u00B3)</th></tr>';
+  var zoneColumns = [{ label: 'Zone' }];
+  classNames.forEach(function(cls) {
+    zoneColumns.push({ label: cls + ' area', unit: 'ha', dec: 1 }, { label: cls + ' vol', unit: 'm\u00B3', dec: 0 });
+  });
+  zoneColumns.push({ label: 'Total vol', unit: 'm\u00B3', dec: 0 });
 
-  var tbody = zoneRows.map(function(zrow){
+  var zoneTableRows = zoneRows.map(function(zrow) {
     var zoneName = (zrow[zoneNameCol]||'').trim();
     var zoneTotal = 0;
-    var cells = '<td><strong>'+escapeHtml(zoneName)+'</strong></td>';
-    classNames.forEach(function(cls){
+    var cells = [{ v: zoneName, strong: true }];
+    classNames.forEach(function(cls) {
       var ha  = parseNum(zrow[cls]||'0');
       var eff = classAvgEff[cls];
       var avg = eff ? eff.avg : 0;
       var vol = (isNaN(ha)?0:ha) * avg;
       zoneTotal += vol;
       colTotals[cls] += vol;
-      cells += '<td>'+fmtN(ha,1)+'</td><td>'+fmtN(vol,0)+'</td>';
+      cells.push(ha, vol);
     });
     grandTotal += zoneTotal;
-    return '<tr>'+cells+'<td><strong>'+fmtN(zoneTotal,0)+'</strong></td></tr>';
-  }).join('');
+    cells.push({ v: zoneTotal, strong: true });
+    return { kind: 'data', cells: cells };
+  });
 
   // Totals row
-  var totalsRow = '<tr class="total-row"><td>TOTAL</td>';
-  classNames.forEach(function(cls){ totalsRow += '<td></td><td>'+fmtN(colTotals[cls],0)+'</td>'; });
-  totalsRow += '<td>'+fmtN(grandTotal,0)+'</td></tr>';
+  var totalCells = ['TOTAL'];
+  classNames.forEach(function(cls){ totalCells.push(null, colTotals[cls]); });
+  totalCells.push(grandTotal);
+  zoneTableRows.push({ kind: 'total', cls: 'total-row', cells: totalCells });
 
-  var zoneHtml = '<div class="section-title" style="margin-top:2rem;">Total volume by zone and class (m\u00B3)</div>'
-    +'<div class="zone-table-wrap"><table class="summary"><thead>'+thead+'</thead><tbody>'+tbody+totalsRow+'</tbody></table></div>';
+  var zoneHtml = tableHtml({
+    id: 'volume-by-zone-and-class', title: 'Total volume by zone and class (m\u00B3)', fileBase: 'volume-by-zone-and-class',
+    scroll: true, marginTop: '2rem', columns: zoneColumns, rows: zoneTableRows
+  });
 
   // Plots in tree data not found in plots CSV (unmatched)
   var unmatchedPlots = Object.keys(plotSummary).filter(function(p){return !plotClassMap[p];});
@@ -1114,6 +1318,9 @@ if (typeof module !== 'undefined' && module.exports) {
     NOT_RECORDED: NOT_RECORDED, speciesOf: speciesOf, isNumericCode: isNumericCode,
     speciesCounts: speciesCounts, speciesNumber: speciesNumber,
     numStats: numStats, fmtN: fmtN, escapeHtml: escapeHtml, barChart: barChart,
+    exportTables: exportTables, tableHtml: tableHtml, tableToCSV: tableToCSV, tableToTSV: tableToTSV,
+    tableExportRows: tableExportRows, exportFileName: exportFileName, speciesVolClassTable: speciesVolClassTable,
+    copyTable: copyTable,
     charts: charts, switchTab: switchTab, renderDashboard: renderDashboard, resetApp: resetApp,
     detectTreeColumns: detectTreeColumns, prepareTrees: prepareTrees,
     basalArea_m2: basalArea_m2, treeVolume_m3: treeVolume_m3,
