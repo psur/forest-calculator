@@ -85,6 +85,13 @@
     .empty-msg { font-size: 13px; color: var(--text-muted); padding: 1rem 0; }
     .zone-table-wrap { overflow-x: auto; margin-top: 0.5rem; }
 
+    /* Species × diameter class tables: regeneration (< min. exploitable) vs exploitable groups */
+    table.summary tr.group-head td { text-align: left; font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 12px; }
+    table.summary tr.expl-head td { border-top: 2px solid var(--accent2); color: var(--accent2); }
+    table.summary tr.expl td { background: rgba(29,158,117,0.07); }
+    table.summary tr.subtotal td { font-weight: 600; border-top: 1px solid var(--border-strong); }
+    .table-note { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
     /* Zone upload panel */
     .zone-upload-panel { border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.5rem; }
     .zone-upload-panel h3 { font-size: 14px; font-weight: 500; margin-bottom: 1rem; }
@@ -144,6 +151,7 @@
       <button class="tab-btn" data-tab="dims"    onclick="switchTab('dims')">Dimensions</button>
       <button class="tab-btn" data-tab="volume"  onclick="switchTab('volume')">Volume</button>
       <button class="tab-btn" data-tab="zones"   onclick="switchTab('zones')">Zones</button>
+      <button class="tab-btn" data-tab="spp"     onclick="switchTab('spp')">Species analysis</button>
     </div>
 
     <div id="tab-species" class="tab-panel active"></div>
@@ -193,6 +201,13 @@
         </div>
       </div>
       <div id="zones-result"></div>
+    </div>
+
+    <div id="tab-spp" class="tab-panel">
+      <div id="spp-result"></div>
+      <div class="chart-wrap" style="height:340px;"><canvas id="spp-dclass-chart"></canvas></div>
+      <div id="spp-dclass"></div>
+      <div id="spp-zones"></div>
     </div>
 
   </div>

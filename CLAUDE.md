@@ -16,12 +16,12 @@ Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/
 
 - `tests/fixtures/` — synthetic KoBo-style `trees.csv` (20 trees, 5 plots; tree 18 has a quoted multi-line `Notes:` cell), `plots.csv`, `zones.csv`. Every expected value in the tests is worked out by hand in comments against these files; if you change a fixture, update those comments and values.
 - `tests/helpers.js` — installs a minimal `document` stub (class lists, tab panels) and a recording `Chart` stub (`ChartStub.instances`; throws on double destroy), sets `globalThis.Papa` from `tests/vendor/` and `globalThis.CONFIG` from `js/config.js`, then `require`s `js/app.js` (which exports its functions via a conditional `module.exports` at the bottom — keep that block when adding functions you want to test). Volume-tab and zone results are read back from the rendered `innerHTML`. `withConfig(patch, fn)` runs a test with patched settings and restores the defaults.
-- Test files: `parse` (CSV/number parsing), `volume` (calcTrees, plot summary, Volume tab), `height` (Näslund model), `zones` (zone aggregation), `config` (settings, column errors, diameter-class table), `render` (HTML escaping, chart lifecycle).
+- Test files: `parse` (CSV/number parsing), `volume` (calcTrees, plot summary, Volume tab), `height` (Näslund model), `zones` (zone aggregation), `config` (settings, column errors, diameter-class table), `render` (HTML escaping, chart lifecycle), `species` (species analysis, totals cross-checks, species chart).
 - Known bugs are written as tests for the **correct** value with `{ todo: 'KNOWN ISSUE: …' }`; they're reported as TODO without failing the run. When you fix one, remove the `todo` option and delete or update the matching "current behaviour" test.
 
 ## Structure
 
-- `index.html` — all markup and CSS (CSS variables, dark mode via `prefers-color-scheme`). Tabs: Species, Genus, Health, Origin, Quality, Dimensions, Volume, Zones. Uses inline `onclick` handlers that call global functions in `app.js`. Loads `js/config.js` then `js/app.js`.
+- `index.html` — all markup and CSS (CSS variables, dark mode via `prefers-color-scheme`). Tabs: Species, Genus, Health, Origin, Quality, Dimensions, Volume, Zones, Species analysis (`spp`). Uses inline `onclick` handlers that call global functions in `app.js`. Loads `js/config.js` then `js/app.js`.
 - `js/config.js` — the global `CONFIG` object: every project-specific constant (see below). Put new settings here, not in app.js.
 - `js/app.js` — everything else: CSV parsing (`parseCSVText` wraps PapaParse; `parseNum`), column detection (`detectTreeColumns`, `findCol`), `prepareTrees` (detect columns + fit height model into `state`), tree metrics (`basalArea_m2`, `treeVolume_m3`, `calcTrees`, `buildPlotSummary`, `diameterClassTable`), height model (`fitNaslund`, `naslundHeight`, `fitHeightModel`, `estimateHeight`), rendering (`renderDashboard`, `renderVolumeTab`, `runZoneCalculation`), file loading. ES5 style; globals `state` (`trees`, `plots`, `zones`, `cols`, `heightModel`) and `charts`.
 
@@ -36,7 +36,7 @@ Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/
 | `classCodes` | `12`, `21`, `22` | known classes; others are flagged |
 | `classFallbacks` | `12→[21]`, `21→[22]`, `22→[21,12]` | class without plots borrows first listed class that has plots |
 | `diameterClassWidth_cm` | 5 | diameter histogram and trees/ha table |
-| `minExploitableDiameter_cm` | 30 | not used in calculations yet |
+| `minExploitableDiameter_cm` | 30 | splits species tables / chart into regeneration (< 30) and exploitable (≥ 30); diameter class edges are laid on a grid through it |
 | `heightModel.enabled` | true | estimate missing heights |
 | `heightModel.minTreesPerSpecies` | 10 | measured trees needed for a species curve (and for the all-species curve) |
 
@@ -55,7 +55,11 @@ Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/
 - Volume tab mean = average over the surveyed plots (`surveyedPlots`): every plot in the Plots CSV once loaded (the tab re-renders then), otherwise every plot with a row in the tree data; plots without volume count as 0. Tree-data plots missing from the Plots CSV are listed with `*` and excluded — same rule as the Zones tab, so the mean equals the plot-weighted mean of the class averages
 - Class avg vol/ha = average over **all** plots in Plots CSV of that class (plots without volume count as 0); classes without plots use `CONFIG.classFallbacks`
 - Zone volume = Σ(class ha × class avg vol/ha)
-- Diameter-class trees/ha table: each tree counts `1 / InclusionZone_ha`; class sums averaged over plots present in the tree CSV (does not yet use the Plots CSV, unlike the Volume and Zones tabs); classes `CONFIG.diameterClassWidth_cm` wide, `lo ≤ d < hi`
+- **One plot-averaging rule everywhere**: per-hectare figures are Σ(value / InclusionZone_ha) over the trees of the surveyed plots (`surveyedPlots`) ÷ number of those plots. Volume tab, Dimensions diameter-class table and Species analysis all use it and re-render when the Plots CSV is loaded; the Zones tab applies it per class (`classAverages`)
+- Diameter classes (`dClassIndex`, `dClassRange`): `CONFIG.diameterClassWidth_cm` wide, `lo ≤ d < hi`, edges on a grid through `minExploitableDiameter_cm` (so 30 cm is always an edge), from the class holding the smallest diameter to the one holding the largest
+- Diameter-class trees/ha table (Dimensions): each tree counts `1 / InclusionZone_ha`; class values rounded, TOTAL = sum of rounded values (`sumTreesHa` holds the unrounded total)
+- Species analysis (`speciesAnalysis`, pure): per species trees/ha, basal area/ha, sample volume, vol/ha, share of total vol/ha, vol/ha ≥ 30 cm, diameter n/mean/min/max (sample) and QMD per hectare = √(BA/ha ÷ trees/ha × 40000/π); species × class tables of trees/ha and vol/ha. Trees without volume (no height, no curve) still count for trees/ha and BA/ha. Species sums equal the overall totals (tested)
+- Volume per species and zone (`speciesZoneVolumes`): same as the Zones tab but per species — `readPlotClasses` + `classAverages` (incl. fallbacks) on the species' per-plot vol/ha; species add up to the Zones-tab totals
 - Näslund fit is OLS on the linearized form. It's slightly biased low (≈ −0.03 m with height error proportional to height; up to ≈ −0.5 m if many small trees near 1.3 m are measured with constant ±2 m error). Negligible next to prediction error at typical n; switch to a direct least-squares fit in h if that ever matters
 
 ## Conventions
@@ -65,3 +69,6 @@ Node's built-in test runner (Node 20+), no npm dependencies. It picks up `tests/
 - CSV parsing: `parseCSVText` picks `;` or `,` from the first non-blank line and passes it to PapaParse explicitly (Papa's own guessing is unreliable with decimal commas). Parse warnings (e.g. unclosed quote) are returned in `errors` and shown in the debug line for the tree file.
 - Charts: never create them directly or in `setTimeout`. Register with `setTabCharts(tab, buildFn)` (buildFn returns an array of Chart instances); it destroys the tab's old charts and draws now if the tab is visible, otherwise on `switchTab`. `resetApp` → `destroyAllCharts()`.
 - Number display: `fmtN` (non-breaking-space thousands, comma decimal).
+- **Species values**: always read them with `speciesOf(row, col)` (trimmed value; blank → `NOT_RECORDED` = "(not recorded)") and count them with `speciesCounts` — no filtering, numeric values such as "7" included everywhere (Species/Genus tabs, summary card, Species analysis). `speciesNumber` excludes "(not recorded)" from the species count; it still appears as a row and in totals. Numeric values get `numericSpeciesWarningHtml` (likely KoBo choice codes). Health/Origin/Quality still use `countBy`, which hides numeric values.
+- Counting by value: use `countValues` (Map-based). Plain objects enumerate integer-like keys ("7") first, which breaks the tie order.
+- Line endings: `.gitattributes` stores js/html/css/md/csv/json with LF.

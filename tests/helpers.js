@@ -12,7 +12,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const TABS = ['species', 'genus', 'health', 'origin', 'quality', 'dims', 'volume', 'zones'];
+const TABS = ['species', 'genus', 'health', 'origin', 'quality', 'dims', 'volume', 'zones', 'spp'];
+const elements = {};   // id → element; appended elements are registered by id, as in a real DOM
 
 function makeElement(id) {
   const classes = new Set();
@@ -22,7 +23,7 @@ function makeElement(id) {
       add(c) { classes.add(c); }, remove(c) { classes.delete(c); }, contains(c) { return classes.has(c); },
       toggle(c, on) { (on === undefined ? !classes.has(c) : on) ? classes.add(c) : classes.delete(c); }
     },
-    parentNode: { appendChild() {}, removeChild() {} },
+    parentNode: { appendChild(child) { if (child.id) elements[child.id] = child; }, removeChild() {} },
     addEventListener() {}, getAttribute() { return null; }
   };
 }
@@ -43,7 +44,6 @@ class ChartStub {
 ChartStub.instances = [];
 
 function installDomStub() {
-  const elements = {};
   const byId = id => elements[id] || (elements[id] = makeElement(id));
   globalThis.document = {
     getElementById: byId,
