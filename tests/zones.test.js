@@ -85,7 +85,7 @@ test('zones: summary cards', () => {
 test('zones: warnings — unmatched plot and estimated heights', () => {
   const { html } = runFixtureZones();
   assert.match(html, /1 plot\(s\) not found in Plots CSV and excluded: 6/);
-  assert.match(html, /1 height\(s\) estimated from the height–diameter model/);
+  assert.match(html, /Heights estimated for 1 tree\(s\) without a measured height/);
   assert.doesNotMatch(html, /not in CONFIG\.classCodes/);
 });
 

@@ -105,7 +105,7 @@ function resetApp() {
   document.getElementById('btn-plots').classList.remove('loaded');
   document.getElementById('btn-zones').classList.remove('loaded');
   document.getElementById('zones-result').innerHTML = '';
-  ['spp-result', 'spp-dclass', 'spp-zones'].forEach(function(id){ document.getElementById(id).innerHTML = ''; });
+  document.getElementById('species-analysis').innerHTML = '';
   updateZoneUploadStatus();
 }
 
@@ -448,7 +448,7 @@ function renderDashboard(parsed, fileName) {
     +(hs?'<div class="stat-card"><div class="label">Max height</div><div class="value">'+hs.max+'<span> m</span></div></div>':'');
 
   // Species tab: every value, all bars; percentages of all tree records add up to 100 %
-  document.getElementById('tab-species').innerHTML = speciesCol
+  document.getElementById('species-breakdown').innerHTML = speciesCol
     ? numericSpeciesWarningHtml(speciesEntries)
       + '<div class="section-title">Species breakdown</div>' + barChart(speciesEntries, rows.length, Infinity)
       + '<p class="table-note">' + rows.length + ' tree record(s), ' + speciesNumber(speciesEntries) + ' species'
@@ -517,7 +517,7 @@ function renderDashboard(parsed, fileName) {
   });
 
   renderDiameterClassTable(rows, cols, state.plots);
-  renderSpeciesTab();
+  renderSpeciesAnalysis();
 }
 
 /** Trees/ha by diameter class — bottom of the Dimensions tab. Re-rendered when the Plots CSV loads. */
@@ -569,34 +569,10 @@ function heightCounts(rows, cols, trees) {
 
 function heightNoteHtml(counts, heightModel) {
   var parts = [];
-  if (counts.estimated) parts.push(counts.estimated+' height(s) estimated from the height\u2013diameter model');
+  if (counts.estimated) parts.push('Heights estimated for '+counts.estimated+' tree(s) without a measured height');
   if (counts.excluded) parts.push(counts.excluded+' tree(s) without height excluded'
     +(heightModel ? ' (no usable height curve)' : ' (height estimation is off)'));
   return parts.length ? '<p style="font-size:12px;color:#BA7517;margin-top:0.75rem;">&#9888; '+parts.join('; ')+'.</p>' : '';
-}
-
-function heightModelHtml(model, trees) {
-  if (!model) return '<div class="section-title">Height model</div><p class="empty-msg">Height estimation is off (CONFIG.heightModel.enabled).</p>';
-  var fmtP = function(p){ return p ? p.a.toFixed(4)+'</td><td>'+p.b.toFixed(5) : '\u2014</td><td>\u2014'; };
-  var rows = Object.keys(model.measured).sort().map(function(sp) {
-    var own = model.bySpecies[sp];
-    var used = own ? 'species' : model.all ? 'all species' : 'none';
-    return '<tr><td>'+escapeHtml(sp)+'</td><td>'+model.measured[sp]+'</td><td>'+used+'</td><td>'+fmtP(own)+'</td></tr>';
-  }).join('');
-  var est = trees.filter(function(t){return t.heightEstimated;});
-  return '<div class="section-title">Height model</div>'
-    +'<p style="font-size:12px;color:var(--text-muted);margin-bottom:0.5rem;">N\u00E4slund: h = 1.3 + d\u00B2 / (a + b\u00B7d)\u00B2, fitted per species with \u2265 '+model.minTrees
-    +' measured trees, otherwise the all-species curve.</p>'
-    +'<table class="summary"><thead><tr><th>Species</th><th>Measured trees</th><th>Curve used</th><th>a</th><th>b</th></tr></thead><tbody>'
-    +rows
-    +'<tr class="total-row"><td>All species</td><td>'+model.nAll+'</td><td>'+(model.all?'':'too few / no fit')+'</td><td>'+fmtP(model.all)+'</td></tr>'
-    +'</tbody></table>'
-    +(est.length
-      ? '<details style="margin-top:1rem;"><summary style="cursor:pointer;font-size:13px;">'+est.length+' tree(s) with estimated height</summary>'
-        +'<table class="summary"><thead><tr><th>Plot</th><th>Species</th><th>Diameter (cm)</th><th>Est. height (m)</th><th>Curve</th></tr></thead><tbody>'
-        +est.map(function(t){return '<tr><td>'+escapeHtml(t.plot)+'</td><td>'+escapeHtml(t.species)+'</td><td>'+fmtN(t.diam,1)+'</td><td><em>'+fmtN(t.height,1)+'</em></td><td>'+(t.heightSource==='species'?'species':'all species')+'</td></tr>';}).join('')
-        +'</tbody></table></details>'
-      : '');
 }
 
 /**
@@ -665,8 +641,7 @@ function renderVolumeTab(rows, cols, heightModel, plotsParsed) {
     }).join('')
     +'</tbody></table>'
     +'<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">'+meanNote+'</p>'
-    +heightNoteHtml(hc, heightModel)
-    +'<div style="margin-top:1.5rem;">'+heightModelHtml(heightModel, trees)+'</div>';
+    +heightNoteHtml(hc, heightModel);
 
   setTabCharts('volume', function(){
     var canvas=document.getElementById('volume-chart'); if(!canvas)return [];
@@ -723,8 +698,7 @@ function speciesAnalysis(rows, cols, heightModel, plotsParsed) {
 
   function zeros() { var a = []; for (var i = 0; i < nCls; i++) a.push(0); return a; }
   function newAcc(name) {
-    return { name: name, n: 0, treesHa: 0, baHa: 0, vol: 0, volHa: 0, treesHaExpl: 0, volHaExpl: 0,
-             dSum: 0, dMin: Infinity, dMax: -Infinity, classTreesHa: zeros(), classVolHa: zeros(),
+    return { name: name, n: 0, treesHa: 0, baHa: 0, vol: 0, volHa: 0, volHaExpl: 0, classVolHa: zeros(),
              volHaByPlot: {}, volHaExplByPlot: {} };
   }
   var bySp = {}, total = newAcc('Total');
@@ -734,23 +708,18 @@ function speciesAnalysis(rows, cols, heightModel, plotsParsed) {
     var expl = ci >= result.splitIndex;
     [a, total].forEach(function(x) {
       x.n++; x.treesHa += t.perHa; x.baHa += t.baHa; x.vol += t.vol; x.volHa += t.volHa;
-      x.dSum += t.d; x.dMin = Math.min(x.dMin, t.d); x.dMax = Math.max(x.dMax, t.d);
-      x.classTreesHa[ci] += t.perHa; x.classVolHa[ci] += t.volHa;
+      x.classVolHa[ci] += t.volHa;
       x.volHaByPlot[t.plot] = (x.volHaByPlot[t.plot] || 0) + t.volHa;
       if (expl) {
-        x.treesHaExpl += t.perHa; x.volHaExpl += t.volHa;
+        x.volHaExpl += t.volHa;
         x.volHaExplByPlot[t.plot] = (x.volHaExplByPlot[t.plot] || 0) + t.volHa;
       }
     });
   });
 
   function finish(x) {
-    ['treesHa', 'baHa', 'volHa', 'treesHaExpl', 'volHaExpl'].forEach(function(k){ x[k] /= nPlots; });
-    x.classTreesHa = x.classTreesHa.map(function(v){ return v / nPlots; });
-    x.classVolHa   = x.classVolHa.map(function(v){ return v / nPlots; });
-    x.dMean = x.dSum / x.n;
-    // Stand QMD: diameter of the tree of mean basal area, weighted by trees/ha
-    x.qmd = x.treesHa > 0 ? Math.sqrt(x.baHa / x.treesHa * 40000 / Math.PI) : NaN;
+    ['treesHa', 'baHa', 'volHa', 'volHaExpl'].forEach(function(k){ x[k] /= nPlots; });
+    x.classVolHa = x.classVolHa.map(function(v){ return v / nPlots; });
     return x;
   }
   result.total = finish(total);
@@ -809,39 +778,35 @@ function speciesSummaryHtml(sa) {
     +(sa.noVolume ? ' '+sa.noVolume+' tree(s) without height count for trees/ha and basal area only.' : '')
     +(sa.outside ? ' '+sa.outside+' tree(s) in plots not in the Plots CSV excluded.' : '')
     +(sa.noDiamIz ? ' '+sa.noDiamIz+' tree record(s) without diameter or inclusion zone not included.' : '')
-    +' Trees (sample) differ from the Species tab counts only by these exclusions.</p>';
-}
-
-function speciesDiameterHtml(sa) {
-  function row(x, cls) {
-    return '<tr'+(cls ? ' class="'+cls+'"' : '')+'><td>'+escapeHtml(x.name)+'</td><td>'+x.n+'</td><td>'+fmtN(x.dMean,1)
-      +'</td><td>'+fmtN(x.dMin,1)+'</td><td>'+fmtN(x.dMax,1)+'</td><td><strong>'+fmtN(x.qmd,1)+'</strong></td></tr>';
-  }
-  return '<div class="section-title" style="margin-top:1.5rem;">Diameter per species (cm)</div>'
-    +'<table class="summary"><thead><tr><th>Species</th><th>n</th><th>Mean</th><th>Min</th><th>Max</th><th>QMD</th></tr></thead><tbody>'
-    +sa.species.map(function(s){ return row(s); }).join('') + row(sa.total, 'total-row')
-    +'</tbody></table>'
-    +'<p class="table-note">n, mean, min, max: measured trees in the sample. QMD (quadratic mean diameter) is per hectare: '
-    +'√(basal area/ha ÷ trees/ha × 40000/π), so each tree is weighted by 1 / InclusionZone_ha.</p>';
+    +' Trees (sample) differ from the species breakdown counts only by these exclusions.</p>';
 }
 
 /**
- * Species × diameter class table (classes as rows), grouped below / at-or-above
- * the minimum exploitable diameter with subtotals. key: 'classTreesHa' | 'classVolHa'.
+ * Volume per hectare by species and diameter class: classes as rows, species
+ * (+ Total) as columns, grouped below / at-or-above the minimum exploitable
+ * diameter with subtotals.
+ * Per-cell output goes through classCell() (class rows) and sumCell() (subtotal
+ * and total rows) — the places to add extras such as confidence intervals.
  */
-function speciesClassTableHtml(sa, key, title, dec) {
+function speciesVolClassTableHtml(sa) {
   var minX = CONFIG.minExploitableDiameter_cm, cols = sa.species.concat([sa.total]);
   var ncol = cols.length + 1;
-  function cell(v) { return Math.abs(v) < 1e-12 ? ZERO_CELL : fmtN(v, dec); }
+  // x: one species (or sa.total); i: class index; from..to-1: class range
+  function classCell(x, i) {
+    var v = x.classVolHa[i];
+    return Math.abs(v) < 1e-12 ? ZERO_CELL : fmtN(v, 2);
+  }
+  function sumCell(x, from, to) {
+    var s = 0;
+    for (var i = from; i < to; i++) s += x.classVolHa[i];
+    return fmtN(s, 2);
+  }
   function classRow(i, cls) {
     return '<tr'+(cls ? ' class="'+cls+'"' : '')+'><td>'+sa.classes[i].lo+' – '+sa.classes[i].hi+' cm</td>'
-      +cols.map(function(x, j){ var v = cell(x[key][i]); return '<td>'+(j === cols.length-1 ? '<strong>'+v+'</strong>' : v)+'</td>'; }).join('')+'</tr>';
+      +cols.map(function(x, j){ var v = classCell(x, i); return '<td>'+(j === cols.length-1 ? '<strong>'+v+'</strong>' : v)+'</td>'; }).join('')+'</tr>';
   }
   function sumRow(label, from, to, cls) {
-    return '<tr class="'+cls+'"><td>'+label+'</td>'+cols.map(function(x) {
-      var s = 0; for (var i = from; i < to; i++) s += x[key][i];
-      return '<td>'+fmtN(s, dec)+'</td>';
-    }).join('')+'</tr>';
+    return '<tr class="'+cls+'"><td>'+label+'</td>'+cols.map(function(x){ return '<td>'+sumCell(x, from, to)+'</td>'; }).join('')+'</tr>';
   }
   function head(label, cls) { return '<tr class="group-head '+cls+'"><td colspan="'+ncol+'">'+label+'</td></tr>'; }
   var n = sa.classes.length, k = sa.splitIndex, body = '', i;
@@ -856,7 +821,7 @@ function speciesClassTableHtml(sa, key, title, dec) {
     body += sumRow('Subtotal ≥ '+minX+' cm', k, n, 'subtotal expl');
   }
   body += sumRow('<strong>TOTAL</strong>', 0, n, 'total-row');
-  return '<div class="section-title" style="margin-top:1.5rem;">'+title+'</div>'
+  return '<div class="section-title" style="margin-top:1.5rem;">Volume per hectare (m³/ha) by species and diameter class</div>'
     +'<div class="zone-table-wrap"><table class="summary"><thead><tr><th>Diameter class</th>'
     +sa.species.map(function(s){ return '<th>'+escapeHtml(s.name)+'</th>'; }).join('')+'<th>Total</th></tr></thead><tbody>'
     +body+'</tbody></table></div>';
@@ -888,67 +853,18 @@ function speciesZonesHtml(sa) {
     +'averaged over all plots of the class in the Plots CSV (classes without plots use the same fallbacks as the Zones tab).</p>';
 }
 
-/** Chart.js plugin: dashed vertical line before category `index` (the exploitable threshold). */
-function thresholdLinePlugin(index, label) {
-  return {
-    id: 'thresholdLine',
-    afterDatasetsDraw: function(chart) {
-      var x = chart.scales.x, area = chart.chartArea, n = chart.data.labels.length;
-      if (!x || index <= 0 || index >= n) return;   // threshold outside the data range
-      var px = (x.getPixelForValue(index - 1) + x.getPixelForValue(index)) / 2;
-      var ctx = chart.ctx;
-      ctx.save();
-      ctx.strokeStyle = '#D85A30'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
-      ctx.beginPath(); ctx.moveTo(px, area.top); ctx.lineTo(px, area.bottom); ctx.stroke();
-      ctx.setLineDash([]); ctx.fillStyle = '#D85A30'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
-      ctx.fillText(label, px + 4, area.top + 12);
-      ctx.restore();
-    }
-  };
-}
-
-/** Species analysis tab. Re-rendered on tree, Plots CSV and Zones CSV load. */
-function renderSpeciesTab() {
-  var res = document.getElementById('spp-result');
-  var dcl = document.getElementById('spp-dclass');
-  var zel = document.getElementById('spp-zones');
-  setTabCharts('spp', null);
-  res.innerHTML = dcl.innerHTML = zel.innerHTML = '';
+/** Species analysis, below the species breakdown in the Species tab. Re-rendered on tree, Plots CSV and Zones CSV load. */
+function renderSpeciesAnalysis() {
+  var el = document.getElementById('species-analysis');
+  el.innerHTML = '';
   if (!state.trees) return;
   var cols = state.cols;
-  if (!cols.diagCol || !cols.izCol) { res.innerHTML = '<p class="empty-msg">Need Diameter and InclusionZone_ha columns.</p>'; return; }
+  if (!cols.diagCol || !cols.izCol) { el.innerHTML = '<p class="empty-msg">Species analysis needs Diameter and InclusionZone_ha columns.</p>'; return; }
   var sa = speciesAnalysis(state.trees.rows, cols, state.heightModel, state.plots);
-  if (!sa.species.length) { res.innerHTML = '<p class="empty-msg">No trees with diameter and inclusion zone.</p>'; return; }
-
-  var minX = CONFIG.minExploitableDiameter_cm;
-  res.innerHTML = (cols.speciesCol ? numericSpeciesWarningHtml(speciesCounts(state.trees.rows, cols.speciesCol)) : '')
-    + speciesSummaryHtml(sa) + speciesDiameterHtml(sa)
-    + '<div class="section-title" style="margin-top:1.5rem;">Trees per hectare by diameter class and species</div>';
-  dcl.innerHTML = speciesClassTableHtml(sa, 'classTreesHa', 'Trees per hectare by species and diameter class', 1)
-    + speciesClassTableHtml(sa, 'classVolHa', 'Volume per hectare (m³/ha) by species and diameter class', 2);
-  zel.innerHTML = speciesZonesHtml(sa);
-
-  setTabCharts('spp', function() {
-    var canvas = document.getElementById('spp-dclass-chart'); if (!canvas) return [];
-    return [new Chart(canvas, {
-      type: 'bar',
-      data: {
-        labels: sa.classes.map(function(c){ return c.lo + '–' + c.hi; }),
-        datasets: sa.species.map(function(s, i) {
-          return { label: s.name, data: s.classTreesHa.map(function(v){ return parseFloat(v.toFixed(2)); }),
-                   backgroundColor: COLORS[i % COLORS.length], stack: 'trees' };
-        })
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: true, position: 'bottom' },
-                   title: { display: true, text: 'Trees per hectare by diameter class (cm) and species' } },
-        scales: { x: { stacked: true, ticks: { maxRotation: 45 } },
-                  y: { stacked: true, beginAtZero: true, title: { display: true, text: 'trees/ha' } } }
-      },
-      plugins: minX != null ? [thresholdLinePlugin(sa.splitIndex, minX + ' cm')] : []
-    })];
-  });
+  if (!sa.species.length) { el.innerHTML = '<p class="empty-msg">No trees with diameter and inclusion zone.</p>'; return; }
+  el.innerHTML = '<div style="margin-top:2rem;">' + speciesSummaryHtml(sa) + '</div>'
+    + speciesVolClassTableHtml(sa)
+    + speciesZonesHtml(sa);
 }
 
 function updateZoneUploadStatus() {
@@ -1151,7 +1067,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (state.trees) {
         renderVolumeTab(state.trees.rows, state.cols, state.heightModel, state.plots);
         renderDiameterClassTable(state.trees.rows, state.cols, state.plots);
-        renderSpeciesTab();
+        renderSpeciesAnalysis();
       }
       document.getElementById('name-plots').textContent = file.name;
       document.getElementById('btn-plots').classList.add('loaded');
@@ -1163,7 +1079,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var file = e.target.files[0]; if(!file) return;
     readFile(file, function(parsed) {
       state.zones = parsed;
-      renderSpeciesTab();   // volume per species and zone
+      renderSpeciesAnalysis();   // volume per species and zone
       document.getElementById('name-zones').textContent = file.name;
       document.getElementById('btn-zones').classList.add('loaded');
       updateZoneUploadStatus();
@@ -1208,7 +1124,7 @@ if (typeof module !== 'undefined' && module.exports) {
     readPlotClasses: readPlotClasses, classAverages: classAverages, readZones: readZones,
     dClassIndex: dClassIndex, dClassRange: dClassRange, renderDiameterClassTable: renderDiameterClassTable,
     speciesAnalysis: speciesAnalysis, speciesZoneVolumes: speciesZoneVolumes,
-    thresholdLinePlugin: thresholdLinePlugin, renderSpeciesTab: renderSpeciesTab,
+    renderSpeciesAnalysis: renderSpeciesAnalysis,
     state: state
   };
 }

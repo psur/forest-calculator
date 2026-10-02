@@ -48,7 +48,7 @@ test('zones: missing-column error escapes the found headers', () => {
   assert.match(html, /Columns found: _index, &lt;img src=x&gt;/);
 });
 
-test('volume tab: species and plot IDs are escaped', () => {
+test('volume tab: plot IDs are escaped (species names are not shown there)', () => {
   // 10 measured trees (enough for the all-species curve) + one without height
   const lines = ['"Species:";"Diameter [cm]:";"Height [m]:";"InclusionZone_ha";"_parent_index"'];
   for (let i = 0; i < 10; i++) lines.push(`"Picea abies";"${10 + 3 * i}";"${9 + 2 * i}";"0,1";"1"`);
@@ -56,8 +56,7 @@ test('volume tab: species and plot IDs are escaped', () => {
   prepareTrees(parseCSVText(lines.join('\n')));
   renderVolumeTab(state.trees.rows, state.cols, state.heightModel, null);
   const html = el('volume-stats').innerHTML;
-  assert.doesNotMatch(html, /<svg|<b>2/);
-  assert.match(html, /&lt;svg onload=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /<svg|<b>2|svg onload/);
   assert.match(html, /&lt;b&gt;2&lt;\/b&gt;/);
 });
 

@@ -203,12 +203,11 @@ test('renderVolumeTab: mean vol/ha with estimated heights (5 plots)', () => {
   assert.equal(fmtNum(cards['Mean vol/ha']), 32.5);
 });
 
-test('renderVolumeTab: lists trees with estimated height', () => {
+test('renderVolumeTab: estimated heights reported in one line, no method details', () => {
   const { html, tables } = renderFixtureVolumeTab();
-  assert.match(html, /1 tree\(s\) with estimated height/);
-  // last table: Plot | Species | Diameter | Est. height | Curve
-  const est = tables[tables.length - 1];
-  assert.deepEqual(est[1], ['5', 'Fagus sylvatica', '22,4', '20,1', 'all species']);
+  assert.match(html, /Heights estimated for 1 tree\(s\) without a measured height\./);
+  assert.doesNotMatch(html, /Height model|Näslund|<details/);
+  assert.equal(tables.length, 1);   // only the per-plot table
 });
 
 test('renderVolumeTab: height model off → tree 18 excluded, plot 5 counts as 0', () => {

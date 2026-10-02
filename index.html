@@ -151,10 +151,12 @@
       <button class="tab-btn" data-tab="dims"    onclick="switchTab('dims')">Dimensions</button>
       <button class="tab-btn" data-tab="volume"  onclick="switchTab('volume')">Volume</button>
       <button class="tab-btn" data-tab="zones"   onclick="switchTab('zones')">Zones</button>
-      <button class="tab-btn" data-tab="spp"     onclick="switchTab('spp')">Species analysis</button>
     </div>
 
-    <div id="tab-species" class="tab-panel active"></div>
+    <div id="tab-species" class="tab-panel active">
+      <div id="species-breakdown"></div>
+      <div id="species-analysis"></div>
+    </div>
     <div id="tab-genus"   class="tab-panel"></div>
     <div id="tab-health"  class="tab-panel"></div>
     <div id="tab-origin"  class="tab-panel"></div>
@@ -201,13 +203,6 @@
         </div>
       </div>
       <div id="zones-result"></div>
-    </div>
-
-    <div id="tab-spp" class="tab-panel">
-      <div id="spp-result"></div>
-      <div class="chart-wrap" style="height:340px;"><canvas id="spp-dclass-chart"></canvas></div>
-      <div id="spp-dclass"></div>
-      <div id="spp-zones"></div>
     </div>
 
   </div>

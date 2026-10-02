@@ -36,6 +36,9 @@ test('config: index.html loads config.js before app.js; calculations.js is gone'
   const cfg = html.indexOf('src="js/config.js"'), appJs = html.indexOf('src="js/app.js"');
   assert.ok(cfg !== -1 && appJs !== -1 && cfg < appJs);
   assert.ok(!html.includes('calculations.js'));
+  // species analysis lives in the Species tab; no separate tab, no stray text
+  assert.match(html, /<div id="tab-species"[^>]*>\s*<div id="species-breakdown"><\/div>\s*<div id="species-analysis"><\/div>/);
+  assert.ok(!/tab-spp|data-tab="spp"|@@/.test(html));
   assert.ok(!fs.existsSync(path.join(ROOT, 'js', 'calculations.js')));
 });
 

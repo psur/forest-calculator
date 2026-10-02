@@ -12,7 +12,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const TABS = ['species', 'genus', 'health', 'origin', 'quality', 'dims', 'volume', 'zones', 'spp'];
+const TABS = ['species', 'genus', 'health', 'origin', 'quality', 'dims', 'volume', 'zones'];
 const elements = {};   // id → element; appended elements are registered by id, as in a real DOM
 
 function makeElement(id) {
