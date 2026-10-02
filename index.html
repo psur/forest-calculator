@@ -6,6 +6,7 @@
   <title>Forest Calculator</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.6.1/papaparse.min.js" integrity="sha512-AnOKbQ9jVMW8kcgHAlum5yDxAEH96IHm2AyAHdMK6Y/a7uLOc2nuB+rcFEnExTEL5hSWkRsb8rGQRLwUk9hxvg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-QGBBR0SKGR"></script>
   <script>
     window.dataLayer = window.dataLayer || [];
@@ -84,6 +85,22 @@
     .empty-msg { font-size: 13px; color: var(--text-muted); padding: 1rem 0; }
     .zone-table-wrap { overflow-x: auto; margin-top: 0.5rem; }
 
+    /* Species × diameter class tables: regeneration (< min. exploitable) vs exploitable groups */
+    table.summary tr.group-head td { text-align: left; font-size: 12px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; padding-top: 12px; }
+    table.summary tr.expl-head td { border-top: 2px solid var(--accent2); color: var(--accent2); }
+    table.summary tr.expl td { background: rgba(29,158,117,0.07); }
+    table.summary tr.subtotal td { font-weight: 600; border-top: 1px solid var(--border-strong); }
+    .table-note { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Table title row with Download CSV / Copy buttons */
+    .table-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 1.5rem 0 0.75rem; }
+    .table-head:first-child { margin-top: 0; }
+    .table-head .section-title { margin: 0; }
+    .table-actions { display: flex; gap: 6px; }
+    .tbl-btn { font-size: 11px; padding: 2px 9px; cursor: pointer; background: none; border: 0.5px solid var(--border-strong); border-radius: 5px; color: var(--text-muted); font-family: inherit; }
+    .tbl-btn:hover:not(:disabled) { background: var(--bg-secondary); color: var(--text); }
+    .tbl-btn:disabled { color: var(--accent2); border-color: var(--accent2); cursor: default; }
+
     /* Zone upload panel */
     .zone-upload-panel { border: 0.5px solid var(--border-strong); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.5rem; }
     .zone-upload-panel h3 { font-size: 14px; font-weight: 500; margin-bottom: 1rem; }
@@ -145,7 +162,10 @@
       <button class="tab-btn" data-tab="zones"   onclick="switchTab('zones')">Zones</button>
     </div>
 
-    <div id="tab-species" class="tab-panel active"></div>
+    <div id="tab-species" class="tab-panel active">
+      <div id="species-breakdown"></div>
+      <div id="species-analysis"></div>
+    </div>
     <div id="tab-genus"   class="tab-panel"></div>
     <div id="tab-health"  class="tab-panel"></div>
     <div id="tab-origin"  class="tab-panel"></div>
@@ -198,7 +218,7 @@
 
 </main>
 
-<script src="js/calculations.js"></script>
+<script src="js/config.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

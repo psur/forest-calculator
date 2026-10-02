@@ -1,0 +1,8 @@
+# Text files are stored in the repository with LF line endings and checked
+# out with LF on every platform (overrides core.autocrlf for these types).
+*.js   text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+*.md   text eol=lf
+*.csv  text eol=lf
+*.json text eol=lf
